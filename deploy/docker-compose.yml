@@ -1,0 +1,117 @@
+name: amazon-scraper-platform
+
+# Run from this directory:  docker compose up -d
+# Core services (always on): postgres, backend, n8n, worker.
+# WhatsApp delivery (wa-server) is optional and enabled with:  --profile whatsapp
+# For production MOBILE IP, run the worker on the client PC instead (see worker/README.md)
+# and scale the docker worker to 0:  docker compose up -d --scale worker=0
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-scraper}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scraper}
+      POSTGRES_DB: ${POSTGRES_DB:-scraper}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-scraper}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-scraper}:${POSTGRES_PASSWORD:-scraper}@postgres:5432/${POSTGRES_DB:-scraper}
+      API_TOKEN: ${API_TOKEN:-changeme-token}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SHORT_INTERVAL_MINUTES: ${SHORT_INTERVAL_MINUTES:-4}
+      LONG_INTERVAL_MINUTES: ${LONG_INTERVAL_MINUTES:-60}
+      SELECTOR_PROFILE_JSON: ${SELECTOR_PROFILE_JSON:-}
+      SEED_DEMO_GROUP: ${SEED_DEMO_GROUP:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../worker
+      dockerfile: Dockerfile
+    environment:
+      BACKEND_URL: http://backend:8000
+      API_TOKEN: ${API_TOKEN:-changeme-token}
+      WORKER_ID: ${WORKER_ID:-docker-worker-1}
+      PROXY_URL: ${PROXY_URL:-}
+      HEADLESS: ${HEADLESS:-true}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-5}
+      MAX_REQUESTS_PER_MINUTE: ${MAX_REQUESTS_PER_MINUTE:-10}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    environment:
+      N8N_PORT: 5678
+      GENERIC_TIMEZONE: ${TZ:-Asia/Jerusalem}
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: ${N8N_DB:-n8n}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-scraper}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-scraper}
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${ADMIN_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # Env vars consumed by the imported workflows:
+      BACKEND_URL: http://backend:8000
+      API_TOKEN: ${API_TOKEN:-changeme-token}
+      WA_API_URL: ${WA_API_URL:-http://wa-server:3001}
+      WA_API_KEY: ${WA_API_KEY:-}
+      WA_GROUP_ID: ${WA_GROUP_ID:-}
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8ndata:/home/node/.n8n
+      - ../n8n/workflows:/workflows:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Optional: containerized WhatsApp bridge. Enable with --profile whatsapp.
+  # First run prints a QR code in the logs (docker compose logs -f wa-server) to scan.
+  wa-server:
+    profiles: ["whatsapp"]
+    build:
+      context: ${WA_SERVER_PATH:-../wa-server}
+      dockerfile: Dockerfile
+    environment:
+      PORT: 3001
+      WA_API_KEY: ${WA_API_KEY:-}
+    ports:
+      - "${WA_PORT:-3001}:3001"
+    volumes:
+      - wadata:/app/.wwebjs_auth
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  n8ndata:
+  wadata:

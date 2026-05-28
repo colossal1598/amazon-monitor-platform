@@ -1,0 +1,13 @@
+# Backend build context is the repo root; keep the image small and the build fast.
+.git
+.cursor
+worker
+wa-server
+n8n
+deploy
+**/__pycache__
+**/*.pyc
+*.md
+.venv
+venv
+node_modules

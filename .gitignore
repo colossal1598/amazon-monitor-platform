@@ -1,0 +1,14 @@
+amazon_monitor/config.yaml
+__pycache__/
+*.pyc
+
+# Platform v2
+deploy/.env
+.env
+node_modules/
+admin-ui/node_modules/
+.wwebjs_auth/
+.wwebjs_cache/
+*.log
+.venv/
+venv/

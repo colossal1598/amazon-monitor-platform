@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>n8n Scraper Platform — Admin</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">n8n</div>
+        <div class="brand-text">
+          <strong>Scraper Platform</strong>
+          <span>Admin Console</span>
+        </div>
+      </div>
+      <nav class="nav" id="nav">
+        <a href="#/dashboard" data-route="dashboard"><span class="ico">▦</span> Dashboard</a>
+        <a href="#/groups" data-route="groups"><span class="ico">◧</span> Groups</a>
+        <a href="#/profiles" data-route="profiles"><span class="ico">⚙</span> Selector Profiles</a>
+        <a href="#/alerts" data-route="alerts"><span class="ico">◉</span> Alerts</a>
+        <a href="#/products" data-route="products"><span class="ico">▤</span> Products</a>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="btn btn-ghost btn-block" id="refreshBtn"><span class="ico">↻</span> Refresh</button>
+        <div class="conn" id="conn"><span class="dot"></span><span id="connText">connecting…</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumbs" id="crumbs">Dashboard</div>
+        <div class="topbar-actions" id="topbarActions"></div>
+      </header>
+      <section class="content" id="view">
+        <div class="loading">Loading…</div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-root" id="modalRoot"></div>
+  <div class="toast-root" id="toastRoot"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
