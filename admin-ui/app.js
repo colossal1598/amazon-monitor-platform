@@ -276,6 +276,8 @@
         h("td", {}, statusBadge(r.status)),
         h("td", { text: r.trigger || "—" }),
         h("td", { class: "num", text: fmtDur(r.duration_sec) }),
+        h("td", { class: "num", text: r.net_kb == null ? "—" : fmtNum(r.net_kb) }),
+        h("td", { class: "num", text: fmtNum(r.blocked_heavy) }),
         h("td", { class: "num", text: r.items_ok == null ? "—" : r.items_ok + " / " + fmtNum(r.items_skipped) }),
         h("td", { class: "num", text: fmtNum(r.alerts_emitted) }),
         h("td", { class: "num", text: r.captcha ? "⚠ " + r.captcha : "0" }),
@@ -283,7 +285,7 @@
         h("td", { class: "muted cell-title", title: r.error || "", text: r.error || "" }),
       ]));
       panel.appendChild(h("div", { class: "table-wrap" }, h("table", { class: "tbl" }, [
-        h("thead", {}, h("tr", {}, ["Run", "Group", "Status", "Trigger", "Duration", "OK / Skip", "Alerts", "CAPTCHA", "Started", "Error"].map((t) => h("th", { text: t })))),
+        h("thead", {}, h("tr", {}, ["Run", "Group", "Status", "Trigger", "Duration", "Net KB", "Blocked", "OK / Skip", "Alerts", "CAPTCHA", "Started", "Error"].map((t) => h("th", { text: t })))),
         h("tbody", {}, rows),
       ])));
     }

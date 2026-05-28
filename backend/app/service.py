@@ -14,6 +14,7 @@ from . import db, filters
 from .alerts_engine import evaluate_row
 from .config import get_settings
 from .logging_setup import log_event
+from .schemas import GroupFilterModel
 from .selectors import resolve_selectors
 
 LOGGER = logging.getLogger("backend.service")
@@ -39,21 +40,11 @@ def _group_with_filter(group_id: int) -> dict[str, Any] | None:
 
 
 def default_filter() -> dict[str, Any]:
-    return {
-        "accepted_sellers": [],
-        "required_keywords": [],
-        "blacklist_keywords": [],
-        "blacklist_asins": [],
-        "min_price": None,
-        "max_price": None,
-        "require_free_shipping": False,
-        "require_shipping_signal": False,
-        "require_shippable": True,
-        "price_drop_percent": 10,
-        "alert_new": True,
-        "alert_back_in_stock": True,
-        "alert_price_drop": True,
-    }
+    """Single source of truth for filter defaults: the GroupFilterModel schema.
+
+    SQL column DEFAULTs in 001_init.sql are kept in sync for partial inserts/seeds.
+    """
+    return GroupFilterModel().model_dump()
 
 
 # --------------------------------------------------------------------------- #
@@ -284,29 +275,14 @@ def _process_rows(
                         """
                         INSERT INTO alert
                             (group_id, asin, alert_type, title, old_price, new_price,
-                             image_url, product_url, payload, status)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                             image_url, product_url, status)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
                         """,
                         (
                             group_id, asin, decision.alert_type, title, old_price, price,
                             image_url, product_url,
-                            json.dumps({
-                                "group_name": group.get("name"),
-                                "niche": group.get("niche"),
-                                "notify_channel": group.get("notify_channel"),
-                            }),
                         ),
                     )
-                    if decision.alert_type == "price_drop":
-                        cur.execute(
-                            "UPDATE product_state SET last_price_alert = now() WHERE group_id = %s AND asin = %s",
-                            (group_id, asin),
-                        )
-                    else:
-                        cur.execute(
-                            "UPDATE product_state SET last_stock_alert = now() WHERE group_id = %s AND asin = %s",
-                            (group_id, asin),
-                        )
                     alerts_emitted += 1
     return alerts_emitted
 

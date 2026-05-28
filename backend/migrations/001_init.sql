@@ -79,8 +79,6 @@ CREATE TABLE IF NOT EXISTS product_state (
     product_url       TEXT,
     first_seen        TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_price_alert  TIMESTAMPTZ,
-    last_stock_alert  TIMESTAMPTZ,
     PRIMARY KEY (group_id, asin)
 );
 
@@ -104,7 +102,6 @@ CREATE TABLE IF NOT EXISTS alert (
     new_price   NUMERIC,
     image_url   TEXT,
     product_url TEXT,
-    payload     JSONB,
     status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     sent_at     TIMESTAMPTZ

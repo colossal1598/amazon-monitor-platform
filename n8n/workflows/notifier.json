@@ -93,7 +93,7 @@
             {
               "id": "f-message",
               "name": "message",
-              "value": "={{ (() => { const L = { price_drop: 'Price Drop', price_increase: 'Price Increase', back_in_stock: 'Back in Stock', new_deal: 'New Deal' }; const a = $json; const label = L[a.alert_type] || a.alert_type; const out = [label + ': ' + (a.title || '')]; if (a.old_price != null && a.new_price != null) { out.push('Price: $' + a.old_price + ' -> $' + a.new_price); } else if (a.new_price != null) { out.push('Price: $' + a.new_price); } if (a.group_name) { out.push('List: ' + a.group_name); } if (a.product_url) { out.push(a.product_url); } return out.join('\\n'); })() }}",
+              "value": "={{ (() => { const L = { new_product: 'New Product', back_in_stock: 'Back in Stock', price_drop: 'Price Drop' }; const a = $json; const label = L[a.alert_type] || a.alert_type; const out = [label + ': ' + (a.title || '')]; if (a.old_price != null && a.new_price != null) { out.push('Price: $' + a.old_price + ' -> $' + a.new_price); } else if (a.new_price != null) { out.push('Price: $' + a.new_price); } if (a.group_name) { out.push('List: ' + a.group_name); } if (a.product_url) { out.push(a.product_url); } return out.join('\\n'); })() }}",
               "type": "string"
             }
           ]
