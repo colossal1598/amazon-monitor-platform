@@ -1,0 +1,136 @@
+[
+  {
+    "profile_key": "amazon-us-default",
+    "name": "amazon-us-default",
+    "marketplace": "amazon.com",
+    "locale": "en-IL",
+    "is_default": true,
+    "selectors": {
+      "nav": {
+        "wait_until": "commit",
+        "goto_timeout_ms": 45000,
+        "pdp_goto_timeout_ms": 12000,
+        "pdp_ready_wait_ms": 15000,
+        "serp_card_wait_ms": 25000
+      },
+      "pdp": {
+        "ready": [
+          "#productTitle",
+          "#title",
+          "h1.a-size-large",
+          "#corePriceDisplay_desktop_feature_div",
+          "#corePrice_feature_div",
+          "#availability",
+          "#outOfStock",
+          "#add-to-cart-button"
+        ],
+        "title": ["#productTitle", "#title"],
+        "price": [
+          "#corePrice_feature_div .a-price .a-offscreen",
+          "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
+          ".reinventPricePriceToPayMargin .a-price .a-offscreen",
+          ".apex-pricetopay-value .a-offscreen",
+          "#apex-pricetopay-accessibility-label",
+          "#tp_price_block_total_price_ww .a-offscreen",
+          "span.a-price.a-text-price .a-offscreen"
+        ],
+        "price_fallback_roots": [
+          "#desktop_buybox",
+          "#buybox",
+          "#offerDisplayFeature_feature_div",
+          "body"
+        ],
+        "price_whole": ".a-price-whole",
+        "price_fraction": ".a-price-fraction",
+        "image": ["#landingImage", "#imgBlkFront", "#main-image"],
+        "image_dynamic_attr": "data-a-dynamic-image",
+        "shipping_roots": [
+          "#qualifiedBuybox",
+          "#desktop_buybox",
+          "#buybox",
+          "#offerDisplayFeature_feature_div"
+        ],
+        "shipping_secondary_span": "span.a-color-secondary",
+        "shipping_nodes": [
+          "[id^='mir-layout-DELIVERY_BLOCK-slot-']",
+          "#deliveryBlockMessage",
+          "#mir-layout-DELIVERY_BLOCK-slot-PRIMARYDELIVERYBLOCKLARGE",
+          "#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE",
+          "#ddmDeliveryMessage",
+          "[data-cy='delivery-recipe']"
+        ],
+        "shipping_price_attr": "[data-csa-c-delivery-price]",
+        "merchant_feature_names": ["desktop-merchant-info", "desktop-fulfiller-info"],
+        "merchant_roots": [
+          "#merchantInfoFeature_feature_div",
+          "#tabular-buybox",
+          "#offerDisplayFeature_feature_div",
+          "#desktop_buybox",
+          "#buybox",
+          "#desktop_accordion"
+        ],
+        "availability": ["#availability", "#outOfStock", "#desktop_buybox #availability"],
+        "oos_container": "#outOfStock",
+        "captcha_form": "form[action*='validateCaptcha']"
+      },
+      "serp": {
+        "result_card": "div[data-component-type='s-search-result']",
+        "title": [
+          "[data-cy='title-recipe']",
+          "h2",
+          "a.a-link-normal.s-line-clamp-2",
+          "h2 a span",
+          "h2 span"
+        ],
+        "price_recipe": "[data-cy=\"price-recipe\"]",
+        "price": [
+          "span.a-price span.a-offscreen",
+          "span[data-a-color='base'] span.a-offscreen"
+        ],
+        "seller_regions": [
+          "div[data-cy='offer-recipe']",
+          "div[data-cy='secondary-offer-recipe']",
+          "div[data-cy='delivery-recipe']",
+          "div[data-cy='seller-recipe']",
+          ".puis-min-offer-desktop-container",
+          ".puisg-col-inner .a-section.a-spacing-none.a-spacing-top-micro",
+          "div.s-delivery-recipe"
+        ],
+        "seller_has_text": [
+          "span:has-text('Sold by')",
+          "span:has-text('Ships from')",
+          "div.a-row:has-text('Sold by')",
+          "div.a-row:has-text('Ships from')",
+          "[data-seller]"
+        ],
+        "delivery_block": "div[data-cy=\"delivery-block\"]",
+        "delivery_primary": ".udm-primary-delivery-message",
+        "shipping_legacy": [
+          "span:has-text('FREE Shipping')",
+          "span:has-text('FREE delivery')",
+          "span:has-text('to Israel')",
+          "span.a-color-secondary"
+        ],
+        "availability": [
+          "span.a-size-base.a-color-price",
+          "span[class*='availability']",
+          "div[class*='availability'] span"
+        ],
+        "image": "img.s-image",
+        "image_dynamic_attr": "data-a-dynamic-image",
+        "product_link": "h2 a",
+        "fallback_roots": [
+          "div.s-main-slot div.s-result-item.s-asin[data-asin]",
+          "div.s-main-slot div[role='listitem'][data-asin]"
+        ],
+        "carousel_roots": [
+          ".s-searchgrid-carousel div[data-asin]",
+          "[cel_widget_id*='FEATURED_ASINS_LIST'] div[data-asin].s-result-item"
+        ],
+        "more_results_heading": "h2:has-text(\"More results\")",
+        "pagination_next": "a.s-pagination-next",
+        "captcha_form": "form[action*='validateCaptcha']"
+      }
+    }
+  }
+]

@@ -1,4 +1,8 @@
-"""Worker configuration sourced from environment variables."""
+"""Worker configuration sourced from environment variables.
+
+``HEADLESS`` and ``PROXY_URL`` are fallbacks only when the job payload does not
+supply ``browser.headless`` / ``browser.proxy_url`` (or legacy ``headless``).
+"""
 
 from __future__ import annotations
 
@@ -50,6 +54,7 @@ def load_config() -> Config:
         api_token=os.getenv("API_TOKEN", ""),
         worker_id=os.getenv("WORKER_ID", "worker-1"),
         proxy_url=proxy_url,
+        # Fallback only when the job payload does not set browser.headless (or legacy headless).
         headless=_env_bool("HEADLESS", True),
         poll_interval_seconds=_env_int("POLL_INTERVAL_SECONDS", 5),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),

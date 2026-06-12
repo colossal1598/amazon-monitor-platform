@@ -1,114 +1,119 @@
 # Deployment & Runbook
 
-Docker Compose stack for the n8n Scraper Platform.
+Docker Compose stack for the **n8n-centric** Amazon Scraper Platform.
+
+**Windows client PC (full stack on one machine):** see **[WINDOWS_CLIENT_SETUP.md](WINDOWS_CLIENT_SETUP.md)** — Tailscale, Docker Desktop, n8n Data Tables, and residential-IP worker.
+
+## Architecture (n8n-centric)
+
+```mermaid
+flowchart LR
+    n8n[n8n orchestrator]
+    api[Backend API]
+    db[(Postgres)]
+    worker[Playwright worker]
+    wa[wa-server optional]
+    n8n -->|POST /api/jobs| api
+    api -->|webhook job done| n8n
+    worker -->|claim / result| api
+    api --> db
+    n8n -->|GET alerts / POST sent| api
+    n8n --> wa
+```
+
+- **n8n** owns scheduling, diff/filter logic, and alert delivery. Config lives in n8n **Data Tables** (see [n8n/data-tables/README.md](../n8n/data-tables/README.md)).
+- **Backend** is a thin queue + storage API: jobs, state, alerts, metrics. Fires `N8N_JOB_DONE_WEBHOOK_URL` when a job completes.
+- **Worker** is stateless and pull-based (`POST /api/jobs/claim`).
+- **Admin UI** at `/ui/` remains available for dashboards, selector profiles, and optional group management.
 
 ## Services
 
 | Service     | Port | Role |
 |-------------|------|------|
-| `postgres`  | 5432 | Source of truth: config, state, history, jobs, metrics (+ n8n's own DB) |
-| `backend`   | 8000 | FastAPI: config API, job queue, diff/alert/filter engine, admin UI at `/ui/` |
-| `worker`    | -    | Stateless Playwright scraper; pulls jobs from the backend |
-| `n8n`       | 5678 | Orchestrator: schedules runs, delivers alerts via WhatsApp |
-| `wa-server` | 3001 | (optional, `--profile whatsapp`) WhatsApp delivery bridge |
+| `postgres`  | 5432 | Config, state, history, jobs, metrics (+ n8n DB) |
+| `backend`   | 8000 | FastAPI queue/storage, admin UI at `/ui/` |
+| `worker`    | —    | Stateless Playwright scraper |
+| `n8n`       | 5678 | Orchestrator: schedules jobs, processes results, delivers alerts |
+| `wa-server` | 3001 | Optional (`--profile whatsapp`) WhatsApp bridge |
 
 ## Quickstart
 
 ```bash
 cd deploy
-cp .env.example .env          # then edit secrets (API_TOKEN, ADMIN_PASSWORD, ...)
+cp .env.example .env          # edit API_TOKEN, ADMIN_PASSWORD, POSTGRES_PASSWORD, ...
 docker compose up -d --build
 ```
 
 Then open:
-- Admin UI: http://localhost:8000/ui/  (Basic auth: `ADMIN_USER` / `ADMIN_PASSWORD`)
-- n8n editor: http://localhost:5678/  (same Basic auth)
+
+- Admin UI: http://localhost:8000/ui/ (`ADMIN_USER` / `ADMIN_PASSWORD`)
+- n8n editor: http://localhost:5678/ (same Basic auth)
 - API health: http://localhost:8000/health
 
 ## Wire up n8n (one time)
 
-1. Open n8n, go to **Workflows -> Import from File**.
-2. Import all three files from `n8n/workflows/`:
-   - `orchestrator_short.json` (triggers `short` cadence groups)
-   - `orchestrator_long.json` (triggers `long` cadence groups)
-   - `notifier.json` (delivers pending alerts via WhatsApp)
-3. **Activate** each workflow (toggle top-right).
+1. Import workflows from `n8n/workflows/` (see [n8n/README.md](../n8n/README.md)).
+2. Create **Data Tables** per [n8n/data-tables/README.md](../n8n/data-tables/README.md).
+3. Copy the job-processor **Webhook** production URL into `.env` as `N8N_JOB_DONE_WEBHOOK_URL`, then `docker compose up -d backend`.
+4. **Activate** scheduler, job-processor, and `notifier.json` workflows.
 
-The orchestrators call `POST /api/runs`; the backend decides which groups are
-actually due based on each group's cadence/interval, so triggering frequently is safe.
+> **Do not activate** `orchestrator_short.json` / `orchestrator_long.json` — they call the removed `POST /api/runs` endpoint. Use the n8n-centric scheduler workflows that enqueue via `POST /api/jobs`.
 
 ## WhatsApp delivery
 
 Two options:
 
-- **Run wa-server on the host** (recommended; keeps your existing WhatsApp session):
-  start it as you do today on port 3001. n8n reaches it via
-  `WA_API_URL=http://host.docker.internal:3001`. Set `WA_API_KEY` and `WA_GROUP_ID` in `.env`.
-- **Containerize it**: `docker compose --profile whatsapp up -d --build wa-server`,
-  then scan the QR from `docker compose logs -f wa-server`. The session persists in
-  the `wadata` volume.
+- **Host wa-server** (recommended on Windows): run on port 3001, set `WA_API_URL=http://host.docker.internal:3001`. See [WINDOWS_CLIENT_SETUP.md](WINDOWS_CLIENT_SETUP.md#6-whatsapp-wa-server-on-windows).
+- **Docker profile**: `docker compose --profile whatsapp up -d --build wa-server`, scan QR from logs. Session persists in `wadata` volume.
 
-A group's `notify_channel` overrides `WA_GROUP_ID` for that group's alerts.
+Set `WA_API_KEY` and `WA_GROUP_ID` in `.env`. Per-group `notify_channel` in Data Tables overrides `WA_GROUP_ID`.
 
-## Production: mobile IP
+## Production: residential / mobile IP
 
-Amazon blocks datacenter IPs. For a stable residential/mobile IP, run the worker
-on the client PC instead of in Docker (see `worker/README.md`):
+Amazon blocks datacenter IPs. On a **client PC with a home/mobile connection**, run the full stack including the Docker worker with `PROXY_URL` empty — the worker uses the host's outbound IP.
+
+To split control plane (cloud) and scraper (client PC):
 
 ```bash
-docker compose up -d --scale worker=0      # disable the docker worker
-# on the client PC, point the worker at this backend's public URL + API_TOKEN
+# on server: disable docker worker
+docker compose up -d --scale worker=0
+# on client PC: point worker at server BACKEND_URL + API_TOKEN (see worker/README.md)
 ```
 
-Alternatively, set `PROXY_URL` in `.env` to a residential/mobile proxy and keep the
-docker worker.
+Or set `PROXY_URL` to a residential proxy and keep the docker worker on a VPS.
 
-## Selector hotfix (Amazon changed the DOM)
+## Selector hotfix
 
-- Edit the active **Selector Profile** in the admin UI (no restart needed; the worker
-  receives selectors with each job), or
-- Set `SELECTOR_PROFILE_JSON` in `.env` to override globally and `docker compose up -d backend`.
+- Edit **Selector Profiles** in the Admin UI (worker receives selectors with each job), or
+- Set `SELECTOR_PROFILE_JSON` in `.env` and `docker compose up -d backend`.
 
 ## Operations
 
-- Logs (structured JSON): `docker compose logs -f backend worker n8n`
-- Reset everything (DANGER, wipes data): `docker compose down -v`
-- Scale workers: `docker compose up -d --scale worker=3`
+```bash
+docker compose logs -f backend worker n8n
+docker compose up -d --scale worker=3
+docker compose down          # stop, keep volumes
+docker compose down -v       # DANGER: wipe all data
+```
 
-## Deploying on Coolify (Israeli server) — pipeline validation run
+## Coolify / Linux VPS
 
-Coolify runs on a datacenter IP, so Amazon will likely captcha the scraper. Use this
-run to validate the control plane end-to-end (n8n -> queue -> worker -> state ->
-alerts -> dashboards/logs), not scrape quality.
+Coolify on a datacenter IP is fine for validating the control plane (n8n → queue → webhooks → dashboards), not scrape quality.
 
-1. In Coolify, create a new **Docker Compose** resource pointing at this repo.
-   - Base directory: repo root. Compose file: `deploy/docker-compose.yml`.
-2. Set environment variables (Coolify -> Environment Variables). At minimum:
-   - `API_TOKEN` (long random), `ADMIN_USER`, `ADMIN_PASSWORD`
-   - `POSTGRES_PASSWORD`
-   - `SEED_DEMO_GROUP=true`  (creates a harmless demo SERP group so a run happens immediately)
-   - Leave `WA_*` empty for the validation run — alerts will queue as `pending`/`failed`
-     and are still visible in the dashboard, so WhatsApp isn't required to validate.
-3. Deploy. Coolify builds `backend`, `worker`, and starts `postgres` + `n8n`.
-   (Skip the `whatsapp` profile for this run.)
-4. Expose the `backend` (8000) and `n8n` (5678) ports/domains via Coolify.
-5. Open the admin UI (`/ui/`), confirm the demo group exists, then import + activate
-   the three n8n workflows (see `n8n/README.md`).
-6. Watch it work:
-   - `docker logs` (or Coolify logs) for `backend`/`worker` — structured JSON events
-     (`run_enqueued`, `job claimed`, `job_result_processed`, `run_finalized`).
-   - Admin dashboard: runs table + charts populate; products/alerts appear (or you see
-     `captcha` counts, which is the expected datacenter-IP outcome).
-
-When you're ready for real scrapes: either run the worker on the mobile-IP PC pointing
-at the Coolify backend URL (and scale the Coolify worker to 0), or set `PROXY_URL` to a
-residential/mobile proxy.
+1. Docker Compose resource: compose file `deploy/docker-compose.yml`, base directory repo root.
+2. Set `API_TOKEN`, `ADMIN_USER`, `ADMIN_PASSWORD`, `POSTGRES_PASSWORD`; optional `SEED_DEMO_GROUP=true`.
+3. Expose ports 8000 (backend) and 5678 (n8n).
+4. Import workflows, create Data Tables, set `N8N_JOB_DONE_WEBHOOK_URL`, activate workflows.
+5. Run the worker on a mobile-IP machine or use `PROXY_URL`.
 
 ## Troubleshooting
 
-- **401 from API**: check `API_TOKEN` (machine calls) or Basic-auth creds (UI/n8n).
-- **No runs happening**: ensure a group is `enabled`, has targets, and the
-  orchestrator workflows are **active** in n8n.
-- **Captcha spikes**: you're likely on a datacenter IP - use the client-PC worker or a proxy.
-- **n8n can't reach wa-server**: confirm `WA_API_URL`; on Linux the `host-gateway`
-  mapping is set for `host.docker.internal`.
+| Symptom | Check |
+|---------|--------|
+| **401** | `API_TOKEN` (machine) or Basic auth (UI/n8n) |
+| **No jobs** | Data Tables: enabled group + targets; scheduler workflow **Active** |
+| **No webhook** | `N8N_JOB_DONE_WEBHOOK_URL`, backend restarted; URL uses `http://n8n:5678/...` inside Docker |
+| **Captcha** | Datacenter IP — use client-PC worker or proxy |
+| **wa-server unreachable** | `WA_API_URL`, `host.docker.internal` on Windows |
+
+Full Windows walkthrough: **[WINDOWS_CLIENT_SETUP.md](WINDOWS_CLIENT_SETUP.md)**.

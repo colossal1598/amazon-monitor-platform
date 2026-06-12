@@ -1,0 +1,32 @@
+[
+  {
+    "profile_key": "fast",
+    "block_heavy": true,
+    "headless": true,
+    "channel": "chrome",
+    "goto_timeout_ms": 12000,
+    "ready_wait_ms": 8000,
+    "max_goto_retries": 1,
+    "wait_until": "commit"
+  },
+  {
+    "profile_key": "retry",
+    "block_heavy": true,
+    "headless": true,
+    "channel": "chrome",
+    "goto_timeout_ms": 20000,
+    "ready_wait_ms": 15000,
+    "max_goto_retries": 2,
+    "wait_until": "commit"
+  },
+  {
+    "profile_key": "recovery",
+    "block_heavy": false,
+    "headless": true,
+    "channel": "chrome",
+    "goto_timeout_ms": 30000,
+    "ready_wait_ms": 20000,
+    "max_goto_retries": 3,
+    "wait_until": "commit"
+  }
+]

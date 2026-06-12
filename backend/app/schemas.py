@@ -23,6 +23,11 @@ class GroupFilterModel(BaseModel):
     alert_price_drop: bool = True
 
 
+def default_filter() -> dict[str, Any]:
+    """Default group filter values (dashboard / filter_defaults endpoint)."""
+    return GroupFilterModel().model_dump()
+
+
 class GroupCreate(BaseModel):
     name: str
     kind: Literal["pdp", "serp"]
@@ -80,14 +85,18 @@ class SelectorProfileUpdate(BaseModel):
     is_default: Optional[bool] = None
 
 
-class RunRequest(BaseModel):
-    cadence: Optional[Literal["short", "long"]] = None
-    group_id: Optional[int] = None
-    trigger: str = "scheduled"
-
-
 class JobClaim(BaseModel):
     worker_id: str
+
+
+class JobCreate(BaseModel):
+    group_key: str
+    kind: Literal["pdp", "serp"]
+    payload: dict[str, Any]
+    browser_profile: Optional[str] = None
+    attempt: int = 1
+    run_id: Optional[int] = None
+    trigger: Optional[str] = None
 
 
 class JobResult(BaseModel):
@@ -95,3 +104,44 @@ class JobResult(BaseModel):
     metrics: dict[str, Any] = Field(default_factory=dict)
     captcha: bool = False
     error: Optional[str] = None
+    scrape_quality: Optional[str] = None
+    browser_profile: Optional[str] = None
+    attempt: Optional[int] = None
+    timing_ms: Optional[dict[str, Any]] = None
+
+
+class ProductStateUpsert(BaseModel):
+    group_key: str
+    asin: str
+    title: Optional[str] = None
+    seller: Optional[str] = None
+    price: Optional[float] = None
+    in_stock: bool = False
+    image_url: Optional[str] = None
+    product_url: Optional[str] = None
+    group_id: Optional[int] = None
+
+
+class PriceHistoryCreate(BaseModel):
+    group_key: str
+    asin: str
+    price: Optional[float] = None
+    in_stock: Optional[bool] = None
+    group_id: Optional[int] = None
+
+
+class AlertCreate(BaseModel):
+    group_key: str
+    asin: str
+    alert_type: str
+    title: Optional[str] = None
+    old_price: Optional[float] = None
+    new_price: Optional[float] = None
+    image_url: Optional[str] = None
+    product_url: Optional[str] = None
+    notify_channel: Optional[str] = None
+    group_id: Optional[int] = None
+
+
+class StateQuery(BaseModel):
+    group_key: str

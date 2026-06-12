@@ -1,0 +1,383 @@
+{
+  "name": "Process Job Result",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "job-done",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "b2000001-0001-4000-8000-000000000001",
+      "name": "Webhook Job Done",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 400],
+      "webhookId": "job-done-scraper"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "e1", "name": "job_id", "value": "={{ $json.body?.job_id ?? $json.job_id }}", "type": "number" },
+            { "id": "e2", "name": "group_key", "value": "={{ $json.body?.group_key ?? $json.group_key }}", "type": "string" },
+            { "id": "e3", "name": "run_id", "value": "={{ $json.body?.run_id ?? $json.run_id }}", "type": "number" },
+            { "id": "e4", "name": "kind", "value": "={{ $json.body?.kind ?? $json.kind }}", "type": "string" },
+            { "id": "e5", "name": "result", "value": "={{ $json.body?.result ?? $json.result }}", "type": "object" },
+            { "id": "e6", "name": "attempt", "value": "={{ Number($json.body?.result?.attempt ?? $json.result?.attempt ?? 1) }}", "type": "number" },
+            { "id": "e7", "name": "scrape_quality", "value": "={{ $json.body?.result?.scrape_quality ?? $json.result?.scrape_quality ?? 'ok' }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2000001-0002-4000-8000-000000000002",
+      "name": "Extract Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 400]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "group_filters", "mode": "name" },
+        "returnAll": false,
+        "limit": 1,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "group_key",
+              "condition": "equals",
+              "keyValue": "={{ $json.group_key }}"
+            }
+          ]
+        }
+      },
+      "id": "b2000001-0003-4000-8000-000000000003",
+      "name": "Get Group Filters",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "groups", "mode": "name" },
+        "returnAll": false,
+        "limit": 1,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "group_key",
+              "condition": "equals",
+              "keyValue": "={{ $('Extract Context').item.json.group_key }}"
+            }
+          ]
+        }
+      },
+      "id": "b2000001-0004-4000-8000-000000000004",
+      "name": "Get Group",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [680, 500],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const ctx = $('Extract Context').first().json;\nconst filtersRaw = $('Get Group Filters').first()?.json || {};\nconst rows = ctx.result?.rows || [];\n\nfunction parseList(v) {\n  if (Array.isArray(v)) return v.filter(Boolean);\n  if (typeof v === 'string') {\n    const t = v.trim();\n    if (!t) return [];\n    try {\n      const p = JSON.parse(t);\n      return Array.isArray(p) ? p.filter(Boolean) : [t];\n    } catch {\n      return t.split(',').map(s => s.trim()).filter(Boolean);\n    }\n  }\n  return [];\n}\n\nfunction norm(s) { return String(s || '').toLowerCase(); }\n\nfunction acceptedSeller(row, sellers) {\n  if (!sellers.length) return true;\n  const blob = norm(row.seller_text || row.merchant_blob || row.seller || '');\n  return sellers.some(s => blob.includes(norm(s)));\n}\n\nfunction keywordOk(row, req, blk) {\n  const text = norm([row.title, row.seller_text, row.merchant_blob].filter(Boolean).join(' '));\n  for (const k of blk) if (k && text.includes(norm(k))) return false;\n  for (const k of req) if (k && !text.includes(norm(k))) return false;\n  return true;\n}\n\nfunction priceOk(price, minP, maxP) {\n  if (price == null || price === '') return minP == null && maxP == null;\n  const p = Number(price);\n  if (Number.isNaN(p)) return false;\n  if (minP != null && p < Number(minP)) return false;\n  if (maxP != null && p > Number(maxP)) return false;\n  return true;\n}\n\nfunction shippable(row, f) {\n  if (!f.require_shippable) return true;\n  if (row.explicit_oos) return false;\n  const avail = norm(row.availability_text || '');\n  if (/out of stock|currently unavailable|unavailable/.test(avail)) return false;\n  const ship = norm(row.shipping_text || '');\n  if (f.require_free_shipping && !/free/.test(ship)) return false;\n  if (f.require_shipping_signal && !ship && !/delivery|shipping/.test(avail + ship)) return false;\n  return true;\n}\n\nconst f = {\n  accepted_sellers: parseList(filtersRaw.accepted_sellers),\n  required_keywords: parseList(filtersRaw.required_keywords),\n  blacklist_keywords: parseList(filtersRaw.blacklist_keywords),\n  blacklist_asins: parseList(filtersRaw.blacklist_asins).map(a => String(a).toUpperCase()),\n  min_price: filtersRaw.min_price != null && filtersRaw.min_price !== '' ? Number(filtersRaw.min_price) : null,\n  max_price: filtersRaw.max_price != null && filtersRaw.max_price !== '' ? Number(filtersRaw.max_price) : null,\n  require_free_shipping: filtersRaw.require_free_shipping === true || filtersRaw.require_free_shipping === 'true',\n  require_shipping_signal: filtersRaw.require_shipping_signal === true || filtersRaw.require_shipping_signal === 'true',\n  require_shippable: filtersRaw.require_shippable !== false && filtersRaw.require_shippable !== 'false',\n};\n\nconst filtered = [];\nfor (const row of rows) {\n  const asin = String(row.asin || '').toUpperCase();\n  if (!asin || row._skip_update) continue;\n  if (f.blacklist_asins.includes(asin)) continue;\n  if (!acceptedSeller(row, f.accepted_sellers)) continue;\n  if (!keywordOk(row, f.required_keywords, f.blacklist_keywords)) continue;\n  if (!priceOk(row.price, f.min_price, f.max_price)) continue;\n  if (!shippable(row, f)) continue;\n  filtered.push({ ...row, asin });\n}\n\nreturn [{ json: { ...ctx, filtered_rows: filtered, filters_raw: filtersRaw } }];"
+      },
+      "id": "b2000001-0005-4000-8000-000000000005",
+      "name": "Filter Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_URL }}/api/state",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "group_key", "value": "={{ $json.group_key }}" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Token", "value": "={{ $env.API_TOKEN }}" }
+          ]
+        },
+        "options": {
+          "response": { "response": { "fullResponse": true } }
+        }
+      },
+      "id": "b2000001-0006-4000-8000-000000000006",
+      "name": "GET State",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const item = $('Filter Rows').first().json;\nconst ctx = $('Extract Context').first().json;\nconst groupRow = $('Get Group').first()?.json || {};\nconst filtersRaw = item.filters_raw || {};\nconst filtered = item.filtered_rows || [];\nconst stateResp = $('GET State').first().json;\nconst priorList = Array.isArray(stateResp?.body) ? stateResp.body : (Array.isArray(stateResp) ? stateResp : []);\nconst priorByAsin = {};\nfor (const s of priorList) priorByAsin[String(s.asin).toUpperCase()] = s;\n\nfunction inferStock(row) {\n  if (row.explicit_oos) return false;\n  const a = String(row.availability_text || '').toLowerCase();\n  if (/out of stock|currently unavailable/.test(a)) return false;\n  if (/in stock|add to cart|available now/.test(a)) return true;\n  return row.price != null;\n}\n\nfunction productUrl(row) {\n  return row.product_url || (row.asin ? `https://www.amazon.com/dp/${row.asin}` : null);\n}\n\nconst notify = groupRow.notify_channel || null;\nconst group_key = ctx.group_key;\nconst state_upserts = [];\nconst price_history = [];\nconst alerts = [];\n\nconst alertNew = filtersRaw.alert_new !== false && filtersRaw.alert_new !== 'false';\nconst alertStock = filtersRaw.alert_back_in_stock !== false && filtersRaw.alert_back_in_stock !== 'false';\nconst alertDrop = filtersRaw.alert_price_drop !== false && filtersRaw.alert_price_drop !== 'false';\nconst dropPct = Number(filtersRaw.price_drop_percent ?? 10) || 10;\n\nfor (const row of filtered) {\n  const asin = row.asin;\n  const prev = priorByAsin[asin];\n  const price = row.price != null ? Number(row.price) : null;\n  const in_stock = inferStock(row);\n  const title = row.title || prev?.title || asin;\n  const seller = row.seller_text || row.merchant_blob || prev?.seller || null;\n  const image = row.image_url || prev?.image_url || null;\n  const url = productUrl(row);\n\n  state_upserts.push({ group_key, asin, title, seller, price, in_stock, image_url: image, product_url: url });\n  price_history.push({ group_key, asin, price, in_stock });\n\n  if (!prev && alertNew && in_stock) {\n    alerts.push({ group_key, asin, alert_type: 'new_product', title, old_price: null, new_price: price, image_url: image, product_url: url, notify_channel: notify });\n  }\n  if (prev && !prev.in_stock && in_stock && alertStock) {\n    alerts.push({ group_key, asin, alert_type: 'back_in_stock', title, old_price: prev.price ?? null, new_price: price, image_url: image, product_url: url, notify_channel: notify });\n  }\n  if (prev && prev.price != null && price != null && price < Number(prev.price) && alertDrop) {\n    const pct = ((Number(prev.price) - price) / Number(prev.price)) * 100;\n    if (pct >= dropPct) {\n      alerts.push({ group_key, asin, alert_type: 'price_drop', title, old_price: Number(prev.price), new_price: price, image_url: image, product_url: url, notify_channel: notify });\n    }\n  }\n}\n\nconst quality = ctx.scrape_quality || ctx.result?.scrape_quality || 'ok';\nconst attempt = Number(ctx.attempt ?? ctx.result?.attempt ?? 1);\nconst needs_recovery = quality !== 'ok' && attempt < 3;\n\nreturn [{ json: {\n  job_id: ctx.job_id,\n  group_key,\n  kind: ctx.kind,\n  run_id: ctx.run_id,\n  state_upserts,\n  price_history,\n  alerts,\n  needs_recovery,\n  recovery_attempt: attempt + 1,\n  scrape_quality: quality,\n  attempt,\n}}];"
+      },
+      "id": "b2000001-0007-4000-8000-000000000007",
+      "name": "Diff and Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.BACKEND_URL }}/api/state",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Token", "value": "={{ $env.API_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.state_upserts }}",
+        "options": {}
+      },
+      "id": "b2000001-0008-4000-8000-000000000008",
+      "name": "PUT State",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/price_history",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Token", "value": "={{ $env.API_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Diff and Alerts').item.json.price_history }}",
+        "options": {}
+      },
+      "id": "b2000001-0009-4000-8000-000000000009",
+      "name": "POST Price History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const d = $('Diff and Alerts').first().json;\nconst alerts = d.alerts || [];\nif (!alerts.length) return [{ json: { ...d, alert: null, _no_alert: true } }];\nreturn alerts.map(a => ({ json: { ...d, alert: a } }));"
+      },
+      "id": "b2000001-0010-4000-8000-000000000010",
+      "name": "Expand Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "has-alert",
+              "leftValue": "={{ $json.alert }}",
+              "rightValue": "",
+              "operator": { "type": "object", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "b2000001-0011-4000-8000-000000000011",
+      "name": "Has Alert",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2220, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/alerts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Token", "value": "={{ $env.API_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.alert }}",
+        "options": {}
+      },
+      "id": "b2000001-0012-4000-8000-000000000012",
+      "name": "POST Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "needs-rec",
+              "leftValue": "={{ $('Diff and Alerts').item.json.needs_recovery }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "b2000001-0013-4000-8000-000000000013",
+      "name": "Needs Recovery",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2440, 520]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "r1", "name": "group_key", "value": "={{ $('Diff and Alerts').item.json.group_key }}", "type": "string" },
+            { "id": "r2", "name": "kind", "value": "={{ $('Diff and Alerts').item.json.kind }}", "type": "string" },
+            { "id": "r3", "name": "attempt", "value": "={{ $('Diff and Alerts').item.json.recovery_attempt }}", "type": "number" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2000001-0014-4000-8000-000000000014",
+      "name": "Prepare Recovery",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2660, 440]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Recovery - Retry Job",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "b2000001-0016-4000-8000-000000000016",
+      "name": "Execute Recovery",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [2880, 440],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.BACKEND_URL }}/api/jobs/{{ $('Diff and Alerts').item.json.job_id }}/processed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Token", "value": "={{ $env.API_TOKEN }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b2000001-0015-4000-8000-000000000015",
+      "name": "PATCH Processed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3100, 520],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook Job Done": {
+      "main": [[{ "node": "Extract Context", "type": "main", "index": 0 }]]
+    },
+    "Extract Context": {
+      "main": [[{ "node": "Get Group Filters", "type": "main", "index": 0 }]]
+    },
+    "Get Group Filters": {
+      "main": [[{ "node": "Get Group", "type": "main", "index": 0 }]]
+    },
+    "Get Group": {
+      "main": [[{ "node": "Filter Rows", "type": "main", "index": 0 }]]
+    },
+    "Filter Rows": {
+      "main": [[{ "node": "GET State", "type": "main", "index": 0 }]]
+    },
+    "GET State": {
+      "main": [[{ "node": "Diff and Alerts", "type": "main", "index": 0 }]]
+    },
+    "Diff and Alerts": {
+      "main": [[{ "node": "PUT State", "type": "main", "index": 0 }]]
+    },
+    "PUT State": {
+      "main": [[{ "node": "POST Price History", "type": "main", "index": 0 }]]
+    },
+    "POST Price History": {
+      "main": [[{ "node": "Expand Alerts", "type": "main", "index": 0 }]]
+    },
+    "Expand Alerts": {
+      "main": [[{ "node": "Has Alert", "type": "main", "index": 0 }]]
+    },
+    "Has Alert": {
+      "main": [
+        [{ "node": "POST Alert", "type": "main", "index": 0 }],
+        [{ "node": "Needs Recovery", "type": "main", "index": 0 }]
+      ]
+    },
+    "POST Alert": {
+      "main": [[{ "node": "Needs Recovery", "type": "main", "index": 0 }]]
+    },
+    "Needs Recovery": {
+      "main": [
+        [{ "node": "Prepare Recovery", "type": "main", "index": 0 }],
+        [{ "node": "PATCH Processed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Recovery": {
+      "main": [[{ "node": "Execute Recovery", "type": "main", "index": 0 }]]
+    },
+    "Execute Recovery": {
+      "main": [[{ "node": "PATCH Processed", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}

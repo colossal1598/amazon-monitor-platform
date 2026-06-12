@@ -1,0 +1,45 @@
+{
+  "groups": [
+    {
+      "group_key": "demo-serp",
+      "name": "Demo SERP — USB-C cables",
+      "kind": "serp",
+      "enabled": true,
+      "interval_minutes": 15,
+      "last_run_at": "",
+      "selector_profile_key": "amazon-us-default",
+      "browser_profile_key": "fast",
+      "notify_channel": "",
+      "headless": true,
+      "max_concurrent": 2
+    }
+  ],
+  "serp_targets": [
+    {
+      "group_key": "demo-serp",
+      "label": "USB-C cables newest",
+      "search_url": "https://www.amazon.com/s?k=usb+c+cable&i=electronics&s=date-desc-rank",
+      "scrape_mode": "newest_front",
+      "max_pages": 1,
+      "enabled": true
+    }
+  ],
+  "group_filters": [
+    {
+      "group_key": "demo-serp",
+      "accepted_sellers": "[]",
+      "required_keywords": "[]",
+      "blacklist_keywords": "[]",
+      "blacklist_asins": "[]",
+      "min_price": null,
+      "max_price": null,
+      "require_free_shipping": false,
+      "require_shipping_signal": false,
+      "require_shippable": true,
+      "price_drop_percent": 10,
+      "alert_new": true,
+      "alert_back_in_stock": true,
+      "alert_price_drop": true
+    }
+  ]
+}

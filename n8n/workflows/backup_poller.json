@@ -1,0 +1,110 @@
+{
+  "name": "Backup Poller - Unprocessed Jobs",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "d4000001-0001-4000-8000-000000000001",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_URL }}/api/jobs/done",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [{ "name": "limit", "value": "50" }]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Token", "value": "={{ $env.API_TOKEN }}" }
+          ]
+        },
+        "options": {
+          "response": { "response": { "fullResponse": true } }
+        }
+      },
+      "id": "d4000001-0002-4000-8000-000000000002",
+      "name": "GET Done Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body",
+        "options": {}
+      },
+      "id": "d4000001-0003-4000-8000-000000000003",
+      "name": "Split Jobs",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [680, 400]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "p1", "name": "job_id", "value": "={{ $json.id }}", "type": "number" },
+            { "id": "p2", "name": "group_key", "value": "={{ $json.group_key }}", "type": "string" },
+            { "id": "p3", "name": "run_id", "value": "={{ $json.run_id }}", "type": "number" },
+            { "id": "p4", "name": "kind", "value": "={{ $json.kind }}", "type": "string" },
+            { "id": "p5", "name": "result", "value": "={{ typeof $json.result === 'string' ? JSON.parse($json.result) : $json.result }}", "type": "object" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d4000001-0004-4000-8000-000000000004",
+      "name": "To Webhook Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_URL || 'http://n8n:5678/webhook/job-done' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { job_id: $json.job_id, group_key: $json.group_key, run_id: $json.run_id, kind: $json.kind, result: $json.result } }}",
+        "options": {}
+      },
+      "id": "d4000001-0005-4000-8000-000000000005",
+      "name": "POST Process Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [[{ "node": "GET Done Jobs", "type": "main", "index": 0 }]]
+    },
+    "GET Done Jobs": {
+      "main": [[{ "node": "Split Jobs", "type": "main", "index": 0 }]]
+    },
+    "Split Jobs": {
+      "main": [[{ "node": "To Webhook Payload", "type": "main", "index": 0 }]]
+    },
+    "To Webhook Payload": {
+      "main": [[{ "node": "POST Process Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}

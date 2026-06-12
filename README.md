@@ -2,50 +2,48 @@
 
 A cheap, fast, dynamic, self-hostable platform for monitoring Amazon PDPs and SERPs
 across multiple niches and sellers. Rebuilt around **n8n as orchestrator**, a
-**stateless Playwright worker**, a **FastAPI backend + Postgres** brain, and a
+**stateless Playwright worker**, a **thin FastAPI backend + Postgres** store, and a
 **custom admin UI** with a group builder and readable dashboards.
 
 > Standalone repo. Vendors `wa-server` so the entire stack (including WhatsApp delivery)
 > deploys from a single repository — ideal for Coolify / one-command Docker hosting.
 
-## Architecture
+## Architecture (n8n-centric)
 
 ```mermaid
 flowchart LR
-    subgraph control [Control Plane - host anywhere / Docker]
+    subgraph host [Single host - e.g. Windows client PC + Tailscale]
         n8n[n8n orchestrator]
-        api[Backend API - FastAPI]
+        api[Backend API - thin queue + storage]
         db[(Postgres)]
         ui[Admin UI /ui]
-        wa[wa-server WhatsApp]
-        n8n <--> api
+        worker[Playwright worker]
+        wa[wa-server optional]
+        n8n -->|POST /api/jobs| api
+        api -->|N8N_JOB_DONE_WEBHOOK_URL| n8n
+        worker -->|claim / result| api
         ui <--> api
         api <--> db
+        n8n -->|alerts API| api
         n8n --> wa
     end
-    subgraph edge [Scraper Worker - client PC mobile IP OR Docker+proxy]
-        worker[Playwright worker - stateless]
-    end
-    n8n -->|POST /api/runs| api
-    api -->|enqueue jobs| db
-    worker -->|POST /api/jobs/claim| api
-    worker -->|POST /api/jobs/:id/result| api
-    n8n -->|GET /api/alerts/pending| api
 ```
 
-- **n8n** schedules runs (short/long cadence) and delivers alerts. No business logic.
-- **Backend** owns config, the DB-backed job queue (`FOR UPDATE SKIP LOCKED`), and the
-  generalized diff/alert/filter engine. Serves the admin UI at `/ui/`.
-- **Worker** is stateless and **pull-based**, so it can run on a client PC behind NAT
-  (for mobile IP) with no inbound networking, or in Docker with a `PROXY_URL`.
-- **Selectors are data**: versioned selector profiles in the DB, editable in the UI,
-  overridable via `SELECTOR_PROFILE_JSON` env for emergency hotfixes.
+- **n8n** is the orchestrator: schedules scrapes, reads group config from **Data Tables**,
+  processes job results (diff, filters, alerts), and delivers WhatsApp messages.
+- **Backend** is a thin layer: DB-backed job queue (`FOR UPDATE SKIP LOCKED`), product state,
+  alerts, metrics, and admin UI. Fires a webhook to n8n when each job completes.
+- **Worker** is stateless and **pull-based** — ideal on a client PC with a residential IP
+  (no inbound ports, no proxy), or in Docker with `PROXY_URL`.
+- **Selectors and browser profiles are data**: edit in n8n Data Tables (no deploy needed).
+
+**Windows client deployment (recommended for residential IP):** [deploy/WINDOWS_CLIENT_SETUP.md](deploy/WINDOWS_CLIENT_SETUP.md)
 
 ## Key concepts
 
-- **Group**: a `pdp` or `serp` monitor with its own cadence, selector profile, and
-  **filters** (accepted sellers, required/blacklist keywords, price bounds, shipping
-  rules, alert toggles). Build groups visually in the admin UI.
+- **Group**: a `pdp` or `serp` monitor with its own interval, selector profile, and
+  **filters** (accepted sellers, keywords, price bounds, shipping rules, alert toggles).
+  Configure in **n8n Data Tables**.
 - **Targets**: ASINs (for `pdp` groups) or search URLs (for `serp` groups).
 - **Alerts**: `new_product`, `back_in_stock`, `price_drop` (per-group thresholds),
   delivered via n8n -> WhatsApp.
@@ -57,18 +55,21 @@ flowchart LR
 | `backend/` | FastAPI app, Postgres migrations, selector seed, Dockerfile |
 | `worker/` | Stateless Playwright scraper (selector-driven), Dockerfile |
 | `admin-ui/` | Vanilla JS admin UI (served by the backend at `/ui/`) |
-| `n8n/` | Importable orchestration workflows + notes |
+| `n8n/` | Orchestration workflows, Data Tables schema, setup notes |
 | `wa-server/` | Vendored WhatsApp delivery bridge (Express + whatsapp-web.js) |
 | `deploy/` | `docker-compose.yml`, `.env.example`, runbook (incl. Coolify) |
 
 ## Get started
 
-See **[deploy/README.md](deploy/README.md)** for the one-command Docker quickstart,
-n8n setup, WhatsApp wiring, and the mobile-IP worker option.
+| Scenario | Guide |
+|----------|-------|
+| **Windows client PC** (full stack, residential IP) | [deploy/WINDOWS_CLIENT_SETUP.md](deploy/WINDOWS_CLIENT_SETUP.md) |
+| Docker quickstart / Coolify / Linux | [deploy/README.md](deploy/README.md) |
 
 ```bash
 cd deploy && cp .env.example .env && docker compose up -d --build
 # Admin UI: http://localhost:8000/ui/
+# Then: import n8n workflows, create Data Tables, set N8N_JOB_DONE_WEBHOOK_URL
 ```
 
 ## Observability

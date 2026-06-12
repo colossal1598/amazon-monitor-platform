@@ -27,6 +27,21 @@ _HEAVY_RESOURCE_TYPES = frozenset({"image", "media", "font"})
 # Blocking images/fonts can prevent domcontentloaded; commit + downstream selector waits gate readiness.
 NAV_WAIT_UNTIL = "commit"
 
+_PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
+    "fast": {
+        "goto_timeout_ms": 12_000,
+        "ready_wait_ms": 8_000,
+        "max_goto_retries": 1,
+        "wait_until": NAV_WAIT_UNTIL,
+    },
+    "retry": {
+        "goto_timeout_ms": 20_000,
+        "ready_wait_ms": 15_000,
+        "max_goto_retries": 2,
+        "wait_until": NAV_WAIT_UNTIL,
+    },
+}
+
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -52,6 +67,91 @@ _CONTEXT_KWARGS: dict[str, Any] = {
     "geolocation": {"latitude": 31.5, "longitude": 34.8},
     "permissions": ["geolocation"],
 }
+
+
+@dataclass
+class BrowserConfig:
+    """Per-job browser / navigation settings from the job envelope."""
+
+    profile: str = "fast"
+    block_heavy: bool = True
+    headless: bool = True
+    channel: str = "chrome"
+    proxy_url: Optional[str] = None
+    goto_timeout_ms: int = 12_000
+    ready_wait_ms: int = 8_000
+    max_goto_retries: int = 1
+    wait_until: str = NAV_WAIT_UNTIL
+    rate_limit_rpm: Optional[int] = None
+
+
+def parse_browser_config(
+    payload: dict[str, Any],
+    *,
+    env_headless: bool = True,
+    env_proxy_url: Optional[str] = None,
+    profile_override: Optional[str] = None,
+) -> BrowserConfig:
+    """Build ``BrowserConfig`` from the new ``browser`` envelope or legacy top-level fields."""
+    browser_raw = payload.get("browser")
+    raw: dict[str, Any] = dict(browser_raw) if isinstance(browser_raw, dict) else {}
+
+    profile = profile_override or raw.get("profile") or "fast"
+    if profile not in _PROFILE_DEFAULTS:
+        profile = "fast"
+    defaults = _PROFILE_DEFAULTS[profile]
+
+    nav = payload.get("nav") or {}
+    if isinstance(payload.get("selectors"), dict):
+        nav = payload["selectors"].get("nav") or nav
+    if not isinstance(nav, dict):
+        nav = {}
+
+    def _int(key: str, nav_keys: tuple[str, ...], default: int) -> int:
+        for source in (raw, nav):
+            if not isinstance(source, dict):
+                continue
+            for k in (key, *nav_keys):
+                if k in source and source[k] is not None:
+                    try:
+                        return int(source[k])
+                    except (TypeError, ValueError):
+                        pass
+        return default
+
+    headless = raw.get("headless")
+    if headless is None:
+        headless = payload.get("headless")
+    if headless is None:
+        headless = env_headless
+
+    proxy_url = raw.get("proxy_url")
+    if proxy_url is None or (isinstance(proxy_url, str) and not proxy_url.strip()):
+        proxy_url = env_proxy_url
+
+    rate_limit_rpm = raw.get("rate_limit_rpm")
+    if rate_limit_rpm is not None:
+        try:
+            rate_limit_rpm = int(rate_limit_rpm)
+        except (TypeError, ValueError):
+            rate_limit_rpm = None
+
+    return BrowserConfig(
+        profile=profile,
+        block_heavy=bool(raw.get("block_heavy", True)),
+        headless=bool(headless),
+        channel=str(raw.get("channel") or "chrome"),
+        proxy_url=proxy_url,
+        goto_timeout_ms=_int("goto_timeout_ms", ("pdp_goto_timeout_ms", "goto_timeout_ms"), defaults["goto_timeout_ms"]),
+        ready_wait_ms=_int(
+            "ready_wait_ms",
+            ("pdp_ready_wait_ms", "serp_card_wait_ms"),
+            defaults["ready_wait_ms"],
+        ),
+        max_goto_retries=_int("max_goto_retries", (), defaults["max_goto_retries"]),
+        wait_until=str(raw.get("wait_until") or nav.get("wait_until") or defaults["wait_until"]),
+        rate_limit_rpm=rate_limit_rpm,
+    )
 
 
 @dataclass
@@ -155,16 +255,18 @@ def _random_viewport() -> dict[str, int]:
 def create_stealth_context(
     *,
     metrics: Metrics,
-    headless: bool = True,
-    proxy_url: Optional[str] = None,
+    browser_config: BrowserConfig,
     persistent_dir: Optional[str] = None,
 ) -> BrowserContext:
     """Start a sync Playwright stealth context (used by the SERP scraper)."""
     p = sync_playwright().start()
     chromium = p.chromium
-    launch_args: dict[str, Any] = {"channel": "chrome", "headless": headless}
-    if proxy_url:
-        launch_args["proxy"] = {"server": proxy_url}
+    launch_args: dict[str, Any] = {
+        "channel": browser_config.channel,
+        "headless": browser_config.headless,
+    }
+    if browser_config.proxy_url:
+        launch_args["proxy"] = {"server": browser_config.proxy_url}
 
     context_kwargs = {
         "user_agent": random.choice(USER_AGENTS),
@@ -185,7 +287,8 @@ def create_stealth_context(
     for page in context.pages:
         STEALTH.apply_stealth_sync(page)
 
-    register_heavy_resource_blocking_sync(context, metrics)
+    if browser_config.block_heavy:
+        register_heavy_resource_blocking_sync(context, metrics)
     setattr(context, "_pw_runner", p)
     return context
 
@@ -203,17 +306,19 @@ async def create_stealth_context_async(
     pw: Any,
     *,
     metrics: Metrics,
-    headless: bool = True,
-    proxy_url: Optional[str] = None,
+    browser_config: BrowserConfig,
 ) -> AsyncBrowserContext:
     """Build an async stealth context (used by the multi-tab PDP scraper).
 
     ``pw`` is an already-started ``async_playwright`` instance. Returns a context
     whose owning browser is stashed on ``context._pw_browser`` for later close.
     """
-    launch_kwargs: dict[str, Any] = {"channel": "chrome", "headless": headless}
-    if proxy_url:
-        launch_kwargs["proxy"] = {"server": proxy_url}
+    launch_kwargs: dict[str, Any] = {
+        "channel": browser_config.channel,
+        "headless": browser_config.headless,
+    }
+    if browser_config.proxy_url:
+        launch_kwargs["proxy"] = {"server": browser_config.proxy_url}
 
     browser = await pw.chromium.launch(**launch_kwargs)
     context = await browser.new_context(
@@ -221,7 +326,8 @@ async def create_stealth_context_async(
         viewport=_random_viewport(),
         **_CONTEXT_KWARGS,
     )
-    await register_heavy_resource_blocking_async(context, metrics)
+    if browser_config.block_heavy:
+        await register_heavy_resource_blocking_async(context, metrics)
     await context.set_extra_http_headers({"Accept-Language": "en-IL,en;q=0.9"})
     await context.add_cookies(_AMAZON_COOKIES)
 

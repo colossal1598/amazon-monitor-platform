@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from .browser import (
+    BrowserConfig,
     Metrics,
     TokenBucketRateLimiter,
     attach_net_meter_async,
@@ -293,35 +294,50 @@ def _clamp_concurrency(raw: Any) -> int:
         return 2
 
 
+def _resolve_pdp_quality(result: ScrapeResult) -> str:
+    if result.captcha:
+        return "captcha"
+    if result.error and result.error.startswith("network:"):
+        return "network"
+    if result.items_ok > 0:
+        return "ok"
+    reasons = {r.get("skip_reason") for r in result.rows if r.get("_skip_update")}
+    if reasons == {"parse_failed"} or "parse_failed" in reasons:
+        return "parse_failed"
+    if not result.rows:
+        return "empty"
+    return "empty"
+
+
 async def _scrape_async(
     asins: list[str],
     selectors: dict[str, Any],
-    nav: dict[str, Any],
     *,
-    headless: bool,
-    proxy_url: str | None,
+    browser_config: BrowserConfig,
     max_concurrent: int,
     rate_limiter: TokenBucketRateLimiter | None,
+    attempt: int,
 ) -> ScrapeResult:
     from playwright.async_api import async_playwright
 
+    started = time.monotonic()
+    timing_ms: dict[str, int] = {"goto": 0, "ready_wait": 0, "total": 0}
     metrics = Metrics()
     captcha_form = sel_str(selectors, "captcha_form", _DEFAULTS["captcha_form"])
     ready_selector = ", ".join(sel_list(selectors, "ready", _DEFAULTS["ready"]))
     title_sels = sel_list(selectors, "title", _DEFAULTS["title"])
 
-    wait_until = nav.get("wait_until", "commit")
-    goto_timeout = int(nav.get("pdp_goto_timeout_ms", 12_000))
-    ready_wait = max(3_000, int(nav.get("pdp_ready_wait_ms", 15_000)))
+    wait_until = browser_config.wait_until
+    goto_timeout = browser_config.goto_timeout_ms
+    ready_wait = max(3_000, browser_config.ready_wait_ms)
+    max_goto_retries = max(1, browser_config.max_goto_retries)
 
     sem = asyncio.Semaphore(max_concurrent)
     captcha_abort = asyncio.Event()
     network_error: dict[str, str] = {}
 
     async with async_playwright() as pw:
-        context = await create_stealth_context_async(
-            pw, metrics=metrics, headless=headless, proxy_url=proxy_url
-        )
+        context = await create_stealth_context_async(pw, metrics=metrics, browser_config=browser_config)
 
         async def worker(idx: int, asin: str) -> tuple[int, dict[str, Any]]:
             if captcha_abort.is_set() or network_error:
@@ -337,7 +353,7 @@ async def _scrape_async(
 
                 url = f"https://www.amazon.com/dp/{asin}"
                 last_reason = "navigation_failed"
-                for attempt in range(1, 4):
+                for goto_attempt in range(1, max_goto_retries + 1):
                     if captcha_abort.is_set() or network_error:
                         return idx, _skip_row(asin, "run_aborted")
                     page = await context.new_page()
@@ -345,17 +361,20 @@ async def _scrape_async(
                     try:
                         page.set_default_timeout(2_000)
                         page.set_default_navigation_timeout(goto_timeout)
+                        goto_started = time.monotonic()
                         try:
                             await page.goto(url, wait_until=wait_until, timeout=goto_timeout)
                         except Exception as exc:
+                            timing_ms["goto"] += int((time.monotonic() - goto_started) * 1000)
                             if is_network_error(exc):
                                 network_error["detail"] = str(exc)
                                 return idx, _skip_row(asin, "network")
                             last_reason = "navigation_failed"
-                            if attempt < 3:
+                            if goto_attempt < max_goto_retries:
                                 await asyncio.sleep(random.uniform(*_RETRY_BACKOFF_SECONDS))
                                 continue
                             return idx, _skip_row(asin, last_reason)
+                        timing_ms["goto"] += int((time.monotonic() - goto_started) * 1000)
 
                         title_l = (await page.title() or "").lower()
                         cap_el = await page.query_selector(captcha_form)
@@ -365,6 +384,7 @@ async def _scrape_async(
                             return idx, _skip_row(asin, "captcha")
 
                         ready_ok = False
+                        ready_started = time.monotonic()
                         try:
                             await page.wait_for_selector(
                                 ready_selector, state="attached", timeout=ready_wait
@@ -372,6 +392,7 @@ async def _scrape_async(
                             ready_ok = True
                         except Exception:
                             ready_ok = False
+                        timing_ms["ready_wait"] += int((time.monotonic() - ready_started) * 1000)
 
                         title = await _extract_title(page, title_sels) or (await page.title() or "").strip()
                         merchant_blob = await _extract_merchant_blob(page, selectors)
@@ -424,27 +445,33 @@ async def _scrape_async(
     items_ok = sum(1 for r in rows if not r.get("_skip_update"))
     items_skipped = len(rows) - items_ok
     error = f"network: {network_error['detail']}" if network_error else None
-    return ScrapeResult(
+    timing_ms["total"] = int((time.monotonic() - started) * 1000)
+    result = ScrapeResult(
         rows=rows,
         metrics=metrics,
         captcha=captcha_abort.is_set(),
         error=error,
         items_ok=items_ok,
         items_skipped=items_skipped,
+        browser_profile=browser_config.profile,
+        attempt=attempt,
+        timing_ms=timing_ms,
     )
+    result.scrape_quality = _resolve_pdp_quality(result)
+    return result
 
 
 def scrape_pdp(
-    payload: dict[str, Any],
+    browser_config: BrowserConfig,
+    scrape: dict[str, Any],
+    selectors: dict[str, Any],
     *,
-    proxy_url: str | None,
     rate_limiter: TokenBucketRateLimiter | None,
+    attempt: int = 1,
 ) -> ScrapeResult:
-    raw_asins = payload.get("asins") or []
-    selectors = payload.get("selectors") or {}
-    nav = payload.get("nav") or {}
-    headless = bool(payload.get("headless", True))
-    max_concurrent = _clamp_concurrency(payload.get("max_concurrent", 2))
+    raw_asins = scrape.get("asins") or []
+    pdp_selectors = selectors.get("pdp") if isinstance(selectors.get("pdp"), dict) else selectors
+    max_concurrent = _clamp_concurrency(scrape.get("max_concurrent", 2))
 
     normalized: list[str] = []
     seen: set[str] = set()
@@ -456,7 +483,14 @@ def scrape_pdp(
         normalized.append(asin)
 
     if not normalized:
-        return ScrapeResult(rows=[], metrics=Metrics())
+        empty = ScrapeResult(
+            rows=[],
+            metrics=Metrics(),
+            scrape_quality="empty",
+            browser_profile=browser_config.profile,
+            attempt=attempt,
+        )
+        return empty
 
     log_event(
         LOGGER,
@@ -464,18 +498,19 @@ def scrape_pdp(
         "pdp scrape starting",
         asins=len(normalized),
         max_concurrent=max_concurrent,
-        headless=headless,
+        headless=browser_config.headless,
+        profile=browser_config.profile,
+        attempt=attempt,
     )
     started = time.monotonic()
     result = asyncio.run(
         _scrape_async(
             normalized,
-            selectors,
-            nav,
-            headless=headless,
-            proxy_url=proxy_url,
+            pdp_selectors,
+            browser_config=browser_config,
             max_concurrent=max_concurrent,
             rate_limiter=rate_limiter,
+            attempt=attempt,
         )
     )
     log_event(
@@ -485,6 +520,7 @@ def scrape_pdp(
         items_ok=result.items_ok,
         items_skipped=result.items_skipped,
         captcha=result.captcha,
+        scrape_quality=result.scrape_quality,
         elapsed_s=round(time.monotonic() - started, 2),
     )
     return result

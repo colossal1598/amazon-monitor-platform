@@ -15,8 +15,8 @@ normalized fields and the backend does all filtering.
 | `BACKEND_URL`             | `http://localhost:8000` | Base URL of the backend API.                     |
 | `API_TOKEN`               | _(empty)_               | Sent as `X-API-Token` on every request.          |
 | `WORKER_ID`               | `worker-1`              | Identifies this worker when claiming jobs.       |
-| `PROXY_URL`               | _(unset)_               | Optional proxy, e.g. `http://user:pass@host:port`. Leave unset on a mobile IP. |
-| `HEADLESS`                | `true`                  | Default headless mode (jobs may override).       |
+| `PROXY_URL`               | _(unset)_               | Fallback proxy when the job payload omits `browser.proxy_url`. Leave unset on a mobile IP. |
+| `HEADLESS`                | `true`                  | Fallback headless mode when the job payload omits `browser.headless` (or legacy `headless`). |
 | `POLL_INTERVAL_SECONDS`   | `5`                     | Sleep between polls when there is no work.        |
 | `LOG_LEVEL`               | `INFO`                  | `DEBUG`/`INFO`/`WARNING`/`ERROR`.                |
 | `MAX_REQUESTS_PER_MINUTE` | `10`                    | Token-bucket rate limit for page navigations.    |
@@ -69,13 +69,63 @@ docker run --rm \
   scraper-worker
 ```
 
+## Job payload envelope
+
+Jobs may use the new envelope (recommended) or the legacy flat payload. Both are
+accepted.
+
+**New envelope** (selector profile + browser + scrape sections):
+
+```json
+{
+  "browser": {
+    "profile": "fast",
+    "block_heavy": true,
+    "headless": true,
+    "channel": "chrome",
+    "proxy_url": null,
+    "goto_timeout_ms": 12000,
+    "ready_wait_ms": 8000,
+    "max_goto_retries": 1,
+    "wait_until": "commit",
+    "rate_limit_rpm": null
+  },
+  "selectors": { "pdp": {}, "serp": {}, "nav": {} },
+  "scrape": {
+    "kind": "pdp",
+    "asins": [],
+    "search_url": "",
+    "scrape_mode": "featured_full",
+    "max_pages": 1,
+    "max_concurrent": 2
+  }
+}
+```
+
+**Legacy payload** (still supported): top-level `asins`, `search_url`,
+`selectors`, `nav`, `headless`, `max_concurrent`, `scrape_mode`, `max_pages`.
+
+### Browser profiles
+
+| Profile | `goto_timeout_ms` | `ready_wait_ms` | `max_goto_retries` |
+| ------- | ----------------- | --------------- | ------------------ |
+| `fast`  | 12000             | 8000            | 1                  |
+| `retry` | 20000             | 15000           | 2                  |
+
+The worker always runs the **fast** profile first. If `scrape_quality` is
+`captcha`, `empty`, or `parse_failed`, it retries **once** in-process with the
+**retry** profile before submitting the result.
+
+Per-job `browser.proxy_url` overrides the `PROXY_URL` environment variable when
+set.
+
 ## Backend contract
 
 - `POST {BACKEND_URL}/api/jobs/claim` with `{"worker_id": "<WORKER_ID>"}`
   - `204` → no work; the worker sleeps `POLL_INTERVAL_SECONDS` and retries.
   - `200` → `{"id", "group_id", "run_id", "kind": "pdp"|"serp", "payload": {...}}`.
 - `POST {BACKEND_URL}/api/jobs/{id}/result` with
-  `{"rows": [...], "metrics": {"net_kb", "items_ok", "items_skipped", "blocked_heavy"}, "captcha": bool, "error": string|null}`.
+  `{"rows": [...], "metrics": {"net_kb", "items_ok", "items_skipped", "blocked_heavy"}, "captcha": bool, "error": string|null, "scrape_quality": "ok"|"empty"|"captcha"|"parse_failed"|"network", "browser_profile": "fast"|"retry", "attempt": 1|2, "timing_ms": {"goto", "ready_wait", "total"}}`.
 
 All requests carry the `X-API-Token` header.
 

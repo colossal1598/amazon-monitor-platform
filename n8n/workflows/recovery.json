@@ -1,0 +1,217 @@
+{
+  "name": "Recovery - Retry Job",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "c3000001-0001-4000-8000-000000000001",
+      "name": "When Executed",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "groups", "mode": "name" },
+        "returnAll": false,
+        "limit": 1,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "group_key",
+              "condition": "equals",
+              "keyValue": "={{ $json.group_key }}"
+            }
+          ]
+        }
+      },
+      "id": "c3000001-0002-4000-8000-000000000002",
+      "name": "Get Group",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [460, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "serp_targets", "mode": "name" },
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "group_key",
+              "condition": "equals",
+              "keyValue": "={{ $('When Executed').item.json.group_key }}"
+            },
+            { "keyName": "enabled", "condition": "equals", "keyValue": "true" }
+          ]
+        }
+      },
+      "id": "c3000001-0003-4000-8000-000000000003",
+      "name": "Get SERP Targets",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [680, 280],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "pdp_targets", "mode": "name" },
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "group_key",
+              "condition": "equals",
+              "keyValue": "={{ $('When Executed').item.json.group_key }}"
+            },
+            { "keyName": "enabled", "condition": "equals", "keyValue": "true" }
+          ]
+        }
+      },
+      "id": "c3000001-0004-4000-8000-000000000004",
+      "name": "Get PDP Targets",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [680, 520],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "selector_profiles", "mode": "name" },
+        "returnAll": true
+      },
+      "id": "c3000001-0005-4000-8000-000000000005",
+      "name": "Get Selector Profiles",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [900, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "browser_profiles", "mode": "name" },
+        "returnAll": false,
+        "limit": 1,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "profile_key",
+              "condition": "equals",
+              "keyValue": "recovery"
+            }
+          ]
+        }
+      },
+      "id": "c3000001-0006-4000-8000-000000000006",
+      "name": "Get Recovery Browser",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [1120, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "function parseJson(val, fallback) {\n  if (val == null || val === '') return fallback;\n  if (typeof val === 'object') return val;\n  try { return JSON.parse(val); } catch { return fallback; }\n}\n\nconst input = $('When Executed').first().json;\nconst group = $('Get Group').first()?.json || {};\nconst kind = input.kind || group.kind;\nconst attempt = Number(input.attempt) || 2;\nconst serpTargets = $('Get SERP Targets').all().map(i => i.json);\nconst pdpTargets = $('Get PDP Targets').all().map(i => i.json);\nconst selectorRows = $('Get Selector Profiles').all().map(i => i.json);\nconst brRow = $('Get Recovery Browser').first()?.json || {};\n\nconst selKey = group.selector_profile_key || 'amazon-us-default';\nconst selRow = selectorRows.find(s => s.profile_key === selKey) || selectorRows[0];\nif (!selRow) return [{ json: { _skip: true } }];\n\nconst selectors = parseJson(selRow.selectors_json, parseJson(selRow.selectors, {}));\nconst browser = {\n  profile: 'recovery',\n  block_heavy: brRow.block_heavy === true || brRow.block_heavy === 'true' ? true : false,\n  headless: group.headless !== false && group.headless !== 'false',\n  channel: brRow.channel || 'chrome',\n  goto_timeout_ms: Number(brRow.goto_timeout_ms) || 30000,\n  ready_wait_ms: Number(brRow.ready_wait_ms) || 20000,\n  max_goto_retries: Number(brRow.max_goto_retries) || 3,\n  wait_until: brRow.wait_until || 'commit',\n};\n\nconst targets = kind === 'pdp' ? pdpTargets : serpTargets;\nconst jobs = [];\nfor (const target of targets) {\n  const scrape = kind === 'pdp'\n    ? { asins: [String(target.asin || '').toUpperCase()], max_concurrent: Number(group.max_concurrent) || 2 }\n    : { search_url: target.search_url, scrape_mode: target.scrape_mode || 'newest_front', max_pages: Number(target.max_pages) || 1 };\n\n  jobs.push({\n    json: {\n      group_key: input.group_key,\n      kind,\n      browser_profile: 'recovery',\n      attempt,\n      trigger: 'recovery',\n      payload: { browser, selectors, scrape },\n    },\n  });\n}\n\nreturn jobs.length ? jobs : [{ json: { _skip: true } }];"
+      },
+      "id": "c3000001-0007-4000-8000-000000000007",
+      "name": "Build Recovery Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "skip-rec",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "c3000001-0008-4000-8000-000000000008",
+      "name": "Has Recovery Jobs",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/jobs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Token", "value": "={{ $env.API_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { group_key: $json.group_key, kind: $json.kind, payload: $json.payload, browser_profile: $json.browser_profile, attempt: $json.attempt, trigger: $json.trigger } }}",
+        "options": {}
+      },
+      "id": "c3000001-0009-4000-8000-000000000009",
+      "name": "POST Recovery Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "When Executed": {
+      "main": [[{ "node": "Get Group", "type": "main", "index": 0 }]]
+    },
+    "Get Group": {
+      "main": [[{ "node": "Get SERP Targets", "type": "main", "index": 0 }]]
+    },
+    "Get SERP Targets": {
+      "main": [[{ "node": "Get PDP Targets", "type": "main", "index": 0 }]]
+    },
+    "Get PDP Targets": {
+      "main": [[{ "node": "Get Selector Profiles", "type": "main", "index": 0 }]]
+    },
+    "Get Selector Profiles": {
+      "main": [[{ "node": "Get Recovery Browser", "type": "main", "index": 0 }]]
+    },
+    "Get Recovery Browser": {
+      "main": [[{ "node": "Build Recovery Jobs", "type": "main", "index": 0 }]]
+    },
+    "Build Recovery Jobs": {
+      "main": [[{ "node": "Has Recovery Jobs", "type": "main", "index": 0 }]]
+    },
+    "Has Recovery Jobs": {
+      "main": [
+        [{ "node": "POST Recovery Job", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

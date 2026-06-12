@@ -1,0 +1,247 @@
+{
+  "name": "Scheduler - Enqueue Scrape Jobs",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 1 }]
+        }
+      },
+      "id": "a1000001-0001-4000-8000-000000000001",
+      "name": "Every 1 Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 400]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "serp_targets", "mode": "name" },
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            { "keyName": "enabled", "condition": "equals", "keyValue": "true" }
+          ]
+        }
+      },
+      "id": "a1000001-0002-4000-8000-000000000002",
+      "name": "Get SERP Targets",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [480, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "pdp_targets", "mode": "name" },
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            { "keyName": "enabled", "condition": "equals", "keyValue": "true" }
+          ]
+        }
+      },
+      "id": "a1000001-0003-4000-8000-000000000003",
+      "name": "Get PDP Targets",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [720, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "selector_profiles", "mode": "name" },
+        "returnAll": true
+      },
+      "id": "a1000001-0004-4000-8000-000000000004",
+      "name": "Get Selector Profiles",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [960, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "browser_profiles", "mode": "name" },
+        "returnAll": true
+      },
+      "id": "a1000001-0005-4000-8000-000000000005",
+      "name": "Get Browser Profiles",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [1200, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": { "__rl": true, "value": "groups", "mode": "name" },
+        "returnAll": true
+      },
+      "id": "a1000001-0006-4000-8000-000000000006",
+      "name": "Get Groups",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [1440, 400],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const now = Date.now();\nconst out = [];\nfor (const item of $input.all()) {\n  const g = item.json;\n  const enabled = g.enabled === true || g.enabled === 'true' || g.enabled === 1;\n  if (!enabled) continue;\n  const mins = Number(g.interval_minutes) || 15;\n  const last = g.last_run_at ? new Date(g.last_run_at).getTime() : 0;\n  if (!last || (now - last) >= mins * 60 * 1000) {\n    out.push({ json: g });\n  }\n}\nreturn out.length ? out : [{ json: { _skip: true } }];"
+      },
+      "id": "a1000001-0007-4000-8000-000000000007",
+      "name": "Filter Due Groups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 400]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "function parseJson(val, fallback) {\n  if (val == null || val === '') return fallback;\n  if (typeof val === 'object') return val;\n  try { return JSON.parse(val); } catch { return fallback; }\n}\n\nconst serpTargets = $('Get SERP Targets').all().map(i => i.json);\nconst pdpTargets = $('Get PDP Targets').all().map(i => i.json);\nconst selectorRows = $('Get Selector Profiles').all().map(i => i.json);\nconst browserRows = $('Get Browser Profiles').all().map(i => i.json);\nconst dueGroups = $('Filter Due Groups').all().map(i => i.json).filter(g => !g._skip);\n\nconst selectorByKey = Object.fromEntries(selectorRows.map(s => [s.profile_key, s]));\nconst browserByKey = Object.fromEntries(browserRows.map(b => [b.profile_key, b]));\n\nconst jobs = [];\nfor (const group of dueGroups) {\n  const selKey = group.selector_profile_key || 'amazon-us-default';\n  const brKey = group.browser_profile_key || 'fast';\n  const selRow = selectorByKey[selKey] || selectorRows[0];\n  const brRow = browserByKey[brKey] || browserByKey.fast;\n  if (!selRow || !brRow) continue;\n\n  const selectors = parseJson(selRow.selectors_json, parseJson(selRow.selectors, {}));\n  const browser = {\n    profile: brRow.profile_key || 'fast',\n    block_heavy: brRow.block_heavy !== false && brRow.block_heavy !== 'false',\n    headless: group.headless !== false && group.headless !== 'false',\n    channel: brRow.channel || 'chrome',\n    goto_timeout_ms: Number(brRow.goto_timeout_ms) || 12000,\n    ready_wait_ms: Number(brRow.ready_wait_ms) || 8000,\n    max_goto_retries: Number(brRow.max_goto_retries) || 1,\n    wait_until: brRow.wait_until || 'commit',\n  };\n\n  const kind = group.kind;\n  const targets = kind === 'pdp'\n    ? pdpTargets.filter(t => t.group_key === group.group_key)\n    : serpTargets.filter(t => t.group_key === group.group_key);\n\n  for (const target of targets) {\n    const scrape = kind === 'pdp'\n      ? {\n          asins: [String(target.asin || '').toUpperCase()],\n          max_concurrent: Number(group.max_concurrent) || 2,\n        }\n      : {\n          search_url: target.search_url,\n          scrape_mode: target.scrape_mode || 'newest_front',\n          max_pages: Number(target.max_pages) || 1,\n        };\n\n    jobs.push({\n      json: {\n        group_key: group.group_key,\n        kind,\n        browser_profile: browser.profile,\n        attempt: 1,\n        trigger: 'scheduled',\n        payload: { browser, selectors, scrape },\n      },\n    });\n  }\n}\n\nreturn jobs.length ? jobs : [{ json: { _skip: true } }];"
+      },
+      "id": "a1000001-0008-4000-8000-000000000008",
+      "name": "Build Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "skip-job",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1000001-0009-4000-8000-000000000009",
+      "name": "Has Jobs",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2140, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/jobs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Token", "value": "={{ $env.API_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { group_key: $json.group_key, kind: $json.kind, payload: $json.payload, browser_profile: $json.browser_profile, attempt: $json.attempt, trigger: $json.trigger } }}",
+        "options": {}
+      },
+      "id": "a1000001-0010-4000-8000-000000000010",
+      "name": "POST Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2360, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const seen = new Set();\nconst out = [];\nfor (const item of $('Build Jobs').all()) {\n  const gk = item.json.group_key;\n  if (!gk || item.json._skip || seen.has(gk)) continue;\n  seen.add(gk);\n  out.push({ json: { group_key: gk, last_run_at: new Date().toISOString() } });\n}\nreturn out;"
+      },
+      "id": "a1000001-0011-4000-8000-000000000011",
+      "name": "Groups To Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2580, 300]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": { "__rl": true, "value": "groups", "mode": "name" },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "group_key",
+              "condition": "equals",
+              "keyValue": "={{ $json.group_key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "last_run_at": "={{ $json.last_run_at }}"
+          }
+        }
+      },
+      "id": "a1000001-0012-4000-8000-000000000012",
+      "name": "Update Group Last Run",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [2800, 300],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every 1 Minute": {
+      "main": [[{ "node": "Get SERP Targets", "type": "main", "index": 0 }]]
+    },
+    "Get SERP Targets": {
+      "main": [[{ "node": "Get PDP Targets", "type": "main", "index": 0 }]]
+    },
+    "Get PDP Targets": {
+      "main": [[{ "node": "Get Selector Profiles", "type": "main", "index": 0 }]]
+    },
+    "Get Selector Profiles": {
+      "main": [[{ "node": "Get Browser Profiles", "type": "main", "index": 0 }]]
+    },
+    "Get Browser Profiles": {
+      "main": [[{ "node": "Get Groups", "type": "main", "index": 0 }]]
+    },
+    "Get Groups": {
+      "main": [[{ "node": "Filter Due Groups", "type": "main", "index": 0 }]]
+    },
+    "Filter Due Groups": {
+      "main": [[{ "node": "Build Jobs", "type": "main", "index": 0 }]]
+    },
+    "Build Jobs": {
+      "main": [[{ "node": "Has Jobs", "type": "main", "index": 0 }]]
+    },
+    "Has Jobs": {
+      "main": [
+        [{ "node": "POST Job", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "POST Job": {
+      "main": [[{ "node": "Groups To Update", "type": "main", "index": 0 }]]
+    },
+    "Groups To Update": {
+      "main": [[{ "node": "Update Group Last Run", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}

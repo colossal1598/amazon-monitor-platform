@@ -1,5 +1,5 @@
 {
-  "name": "Orchestrator - Short Cadence",
+  "name": "Orchestrator - Short Cadence (legacy)",
   "nodes": [
     {
       "parameters": {
@@ -16,10 +16,7 @@
       "name": "Every 1 Minute",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [
-        260,
-        300
-      ]
+      "position": [260, 300]
     },
     {
       "parameters": {
@@ -43,10 +40,7 @@
       "name": "Enqueue Short Runs",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        520,
-        300
-      ],
+      "position": [520, 300],
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
@@ -55,19 +49,9 @@
   ],
   "connections": {
     "Every 1 Minute": {
-      "main": [
-        [
-          {
-            "node": "Enqueue Short Runs",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Enqueue Short Runs", "type": "main", "index": 0 }]]
     }
   },
   "active": false,
-  "settings": {
-    "executionOrder": "v1"
-  }
+  "settings": { "executionOrder": "v1" }
 }

@@ -25,10 +25,6 @@ class Settings:
         self.admin_password: str = os.getenv("ADMIN_PASSWORD", "admin")
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
 
-        # Cadence -> default interval (minutes). A group may override via interval_minutes.
-        self.short_interval_minutes: int = int(os.getenv("SHORT_INTERVAL_MINUTES", "4"))
-        self.long_interval_minutes: int = int(os.getenv("LONG_INTERVAL_MINUTES", "60"))
-
         # Job lease: if a worker dies, a claimed job is requeued after this many seconds.
         self.job_lease_seconds: int = int(os.getenv("JOB_LEASE_SECONDS", "300"))
 
@@ -36,8 +32,10 @@ class Settings:
         # selectors via env without touching the DB when Amazon changes the DOM.
         self.selector_profile_json: str = os.getenv("SELECTOR_PROFILE_JSON", "")
 
-        # Optional: push pending alerts to an n8n webhook when a run completes.
-        # If unset, n8n is expected to poll GET /alerts/pending instead.
+        # n8n webhook fired when a job completes (primary notification path).
+        self.n8n_job_done_webhook_url: str = os.getenv("N8N_JOB_DONE_WEBHOOK_URL", "")
+
+        # Legacy: optional push of pending-alert count on run completion.
         self.n8n_alerts_webhook_url: str = os.getenv("N8N_ALERTS_WEBHOOK_URL", "")
 
         self.seed_demo_group: bool = _bool(os.getenv("SEED_DEMO_GROUP"), False)

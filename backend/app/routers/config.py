@@ -15,8 +15,8 @@ from ..schemas import (
     SelectorProfileUpdate,
     SerpTargetCreate,
 )
+from ..schemas import default_filter
 from ..security import require_admin
-from ..service import default_filter
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_admin)])
 

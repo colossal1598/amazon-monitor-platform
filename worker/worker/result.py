@@ -16,6 +16,10 @@ class ScrapeResult:
     error: str | None = None
     items_ok: int = 0
     items_skipped: int = 0
+    scrape_quality: str = "ok"
+    browser_profile: str = "fast"
+    attempt: int = 1
+    timing_ms: dict[str, Any] = field(default_factory=dict)
 
     def metrics_payload(self) -> dict[str, Any]:
         return {
@@ -23,4 +27,16 @@ class ScrapeResult:
             "items_ok": self.items_ok,
             "items_skipped": self.items_skipped,
             "blocked_heavy": self.metrics.blocked_heavy,
+        }
+
+    def result_payload(self) -> dict[str, Any]:
+        return {
+            "rows": self.rows,
+            "metrics": self.metrics_payload(),
+            "captcha": self.captcha,
+            "error": self.error,
+            "scrape_quality": self.scrape_quality,
+            "browser_profile": self.browser_profile,
+            "attempt": self.attempt,
+            "timing_ms": self.timing_ms,
         }

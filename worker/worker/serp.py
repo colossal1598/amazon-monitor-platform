@@ -20,6 +20,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .browser import (
+    BrowserConfig,
     Metrics,
     TokenBucketRateLimiter,
     attach_net_meter_sync,
@@ -348,38 +349,67 @@ def _extra_roots(page: Any, selector_groups: list[str], seen_ids: set[int]) -> l
     return roots
 
 
-def scrape_serp(
-    payload: dict[str, Any],
+def _resolve_serp_quality(
     *,
-    proxy_url: str | None,
+    captcha: bool,
+    error: str | None,
+    rows: list[dict[str, Any]],
+    parse_failed: bool,
+) -> str:
+    if captcha:
+        return "captcha"
+    if error and error.startswith("network:"):
+        return "network"
+    if rows:
+        return "ok"
+    if parse_failed:
+        return "parse_failed"
+    return "empty"
+
+
+def scrape_serp(
+    browser_config: BrowserConfig,
+    scrape: dict[str, Any],
+    selectors: dict[str, Any],
+    *,
     rate_limiter: TokenBucketRateLimiter | None,
+    attempt: int = 1,
 ) -> ScrapeResult:
-    search_url = payload.get("search_url") or ""
-    selectors = payload.get("selectors") or {}
-    scrape_mode = payload.get("scrape_mode", "featured_full")
-    max_pages = max(1, int(payload.get("max_pages", 1)))
-    nav = payload.get("nav") or {}
-    headless = bool(payload.get("headless", True))
+    search_url = scrape.get("search_url") or ""
+    serp_selectors = selectors.get("serp") if isinstance(selectors.get("serp"), dict) else selectors
+    scrape_mode = scrape.get("scrape_mode", "featured_full")
+    max_pages = max(1, int(scrape.get("max_pages", 1)))
 
     if not search_url:
-        return ScrapeResult(rows=[], metrics=Metrics(), error="missing search_url")
+        return ScrapeResult(
+            rows=[],
+            metrics=Metrics(),
+            error="missing search_url",
+            scrape_quality="empty",
+            browser_profile=browser_config.profile,
+            attempt=attempt,
+        )
 
-    wait_until = nav.get("wait_until", "commit")
-    goto_timeout = int(nav.get("goto_timeout_ms", 45_000))
-    card_wait = int(nav.get("serp_card_wait_ms", 25_000))
+    wait_until = browser_config.wait_until
+    goto_timeout = browser_config.goto_timeout_ms
+    card_wait = max(3_000, browser_config.ready_wait_ms)
+    max_goto_retries = max(1, browser_config.max_goto_retries)
 
-    result_card_sel = _sel_str(selectors, "result_card")
-    captcha_form = _sel_str(selectors, "captcha_form")
-    pagination_next = _sel_str(selectors, "pagination_next")
-    more_results = _sel_str(selectors, "more_results_heading")
-    fallback_roots = _sel_list(selectors, "fallback_roots")
-    carousel_roots = _sel_list(selectors, "carousel_roots")
+    result_card_sel = _sel_str(serp_selectors, "result_card")
+    captcha_form = _sel_str(serp_selectors, "captcha_form")
+    pagination_next = _sel_str(serp_selectors, "pagination_next")
+    more_results = _sel_str(serp_selectors, "more_results_heading")
+    fallback_roots = _sel_list(serp_selectors, "fallback_roots")
+    carousel_roots = _sel_list(serp_selectors, "carousel_roots")
 
+    started = time.monotonic()
+    timing_ms: dict[str, int] = {"goto": 0, "ready_wait": 0, "total": 0}
     metrics = Metrics()
     rows: list[dict[str, Any]] = []
     items_skipped = 0
     captcha = False
     error: str | None = None
+    parse_failed = False
 
     total_pages = 1 if scrape_mode == "newest_front" else max_pages
 
@@ -389,10 +419,12 @@ def scrape_serp(
         "serp scrape starting",
         scrape_mode=scrape_mode,
         max_pages=total_pages,
-        headless=headless,
+        headless=browser_config.headless,
+        profile=browser_config.profile,
+        attempt=attempt,
     )
 
-    context = create_stealth_context(metrics=metrics, headless=headless, proxy_url=proxy_url)
+    context = create_stealth_context(metrics=metrics, browser_config=browser_config)
     try:
         page = context.new_page()
         attach_net_meter_sync(page, metrics)
@@ -401,15 +433,33 @@ def scrape_serp(
             if rate_limiter:
                 rate_limiter.acquire()
             current_url = _set_page_param(search_url, page_num) if page_num > 1 else search_url
-            try:
-                page.goto(current_url, wait_until=wait_until, timeout=goto_timeout)
-            except Exception as exc:
-                if is_network_error(exc):
-                    error = f"network: {exc}"
+            navigated = False
+            for goto_attempt in range(1, max_goto_retries + 1):
+                goto_started = time.monotonic()
+                try:
+                    page.goto(current_url, wait_until=wait_until, timeout=goto_timeout)
+                    navigated = True
+                    timing_ms["goto"] += int((time.monotonic() - goto_started) * 1000)
                     break
-                log_event(LOGGER, logging.WARNING, "serp navigation failed", page=page_num, error=str(exc))
+                except Exception as exc:
+                    timing_ms["goto"] += int((time.monotonic() - goto_started) * 1000)
+                    if is_network_error(exc):
+                        error = f"network: {exc}"
+                        break
+                    if goto_attempt >= max_goto_retries:
+                        log_event(
+                            LOGGER,
+                            logging.WARNING,
+                            "serp navigation failed",
+                            page=page_num,
+                            error=str(exc),
+                        )
+                        break
+                    time.sleep(random.uniform(1.0, 2.0))
+            if error or not navigated:
                 break
 
+            ready_started = time.monotonic()
             try:
                 page.wait_for_selector("body", state="attached", timeout=card_wait)
                 time.sleep(0.25)
@@ -419,13 +469,17 @@ def scrape_serp(
             if _is_captcha(page, captcha_form):
                 log_event(LOGGER, logging.WARNING, "serp captcha detected", page=page_num)
                 captcha = True
+                timing_ms["ready_wait"] += int((time.monotonic() - ready_started) * 1000)
                 break
 
             try:
                 page.wait_for_selector(result_card_sel, timeout=card_wait)
             except PlaywrightTimeoutError:
                 log_event(LOGGER, logging.WARNING, "serp result cards not found", page=page_num)
+                parse_failed = True
+                timing_ms["ready_wait"] += int((time.monotonic() - ready_started) * 1000)
                 break
+            timing_ms["ready_wait"] += int((time.monotonic() - ready_started) * 1000)
 
             _scroll_to_settle(page)
             if scrape_mode != "newest_front":
@@ -439,7 +493,7 @@ def scrape_serp(
             except Exception:
                 cards = []
             for card in cards:
-                row = _collect_row(card, selectors)
+                row = _collect_row(card, serp_selectors)
                 if row is None:
                     items_skipped += 1
                     continue
@@ -449,14 +503,14 @@ def scrape_serp(
                 rows.append(row)
 
             for card in _extra_roots(page, fallback_roots, seen_ids):
-                row = _collect_row(card, selectors)
+                row = _collect_row(card, serp_selectors)
                 if row is None or row["asin"] in seen_asins:
                     continue
                 seen_asins.add(row["asin"])
                 rows.append(row)
 
             for card in _extra_roots(page, carousel_roots, seen_ids):
-                row = _collect_row(card, selectors)
+                row = _collect_row(card, serp_selectors)
                 if row is None or row["asin"] in seen_asins:
                     continue
                 seen_asins.add(row["asin"])
@@ -484,6 +538,13 @@ def scrape_serp(
         deduped[row["asin"]] = row
     final_rows = list(deduped.values())
 
+    timing_ms["total"] = int((time.monotonic() - started) * 1000)
+    scrape_quality = _resolve_serp_quality(
+        captcha=captcha,
+        error=error,
+        rows=final_rows,
+        parse_failed=parse_failed,
+    )
     result = ScrapeResult(
         rows=final_rows,
         metrics=metrics,
@@ -491,6 +552,10 @@ def scrape_serp(
         error=error,
         items_ok=len(final_rows),
         items_skipped=items_skipped,
+        scrape_quality=scrape_quality,
+        browser_profile=browser_config.profile,
+        attempt=attempt,
+        timing_ms=timing_ms,
     )
     log_event(
         LOGGER,
@@ -499,5 +564,6 @@ def scrape_serp(
         items_ok=result.items_ok,
         items_skipped=result.items_skipped,
         captcha=captcha,
+        scrape_quality=scrape_quality,
     )
     return result
