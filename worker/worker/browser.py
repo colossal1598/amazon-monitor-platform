@@ -58,6 +58,19 @@ USER_AGENTS = [
 
 STEALTH = Stealth()
 
+_pw_instance: Any = None
+_pw_lock = threading.Lock()
+
+
+def _get_playwright() -> Any:
+    """Return a module-level sync Playwright instance, starting it on first use."""
+    global _pw_instance
+    with _pw_lock:
+        if _pw_instance is None:
+            _pw_instance = sync_playwright().start()
+        return _pw_instance
+
+
 _AMAZON_COOKIES: list[dict[str, Any]] = [
     {"name": "i18n-prefs", "value": "USD", "domain": ".amazon.com", "path": "/", "secure": True},
     {"name": "lc-main", "value": "en_US", "domain": ".amazon.com", "path": "/", "secure": True},
@@ -260,9 +273,14 @@ def create_stealth_context(
     browser_config: BrowserConfig,
     persistent_dir: Optional[str] = None,
 ) -> BrowserContext:
-    """Start a sync Playwright stealth context (used by the SERP scraper)."""
-    p = sync_playwright().start()
-    chromium = p.chromium
+    """Start a sync Playwright stealth context (used by the SERP scraper).
+
+    Uses a single shared Playwright instance for the lifetime of the worker
+    process — calling ``sync_playwright().start()`` more than once triggers
+    an "asyncio loop" error in Playwright >= 1.44.
+    """
+    pw = _get_playwright()
+    chromium = pw.chromium
     launch_args: dict[str, Any] = {
         "channel": browser_config.channel,
         "headless": browser_config.headless,
@@ -291,17 +309,14 @@ def create_stealth_context(
 
     if browser_config.block_heavy:
         register_heavy_resource_blocking_sync(context, metrics)
-    setattr(context, "_pw_runner", p)
     return context
 
 
 def close_context(context: BrowserContext) -> None:
-    pw_runner = getattr(context, "_pw_runner", None)
     try:
         context.close()
-    finally:
-        if pw_runner is not None:
-            pw_runner.stop()
+    except Exception:
+        pass
 
 
 async def create_stealth_context_async(
