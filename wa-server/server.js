@@ -47,8 +47,8 @@ function resolveValidImagePath(imagePath) {
 const app = express();
 app.use(express.json());
 
-const PORT = 3001;
-const API_KEY = "eTjW1zf2cDDZ";
+const PORT = process.env.PORT || 3001;
+const API_KEY = process.env.WA_API_KEY || "eTjW1zf2cDDZ";
 
 let isReady = false;
 

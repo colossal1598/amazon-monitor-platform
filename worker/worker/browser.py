@@ -91,7 +91,7 @@ class BrowserConfig:
     profile: str = "fast"
     block_heavy: bool = True
     headless: bool = True
-    channel: str = "chrome"
+    channel: str = ""
     proxy_url: Optional[str] = None
     goto_timeout_ms: int = 12_000
     ready_wait_ms: int = 8_000
@@ -155,7 +155,7 @@ def parse_browser_config(
         profile=profile,
         block_heavy=bool(raw.get("block_heavy", True)),
         headless=bool(headless),
-        channel=str(raw.get("channel") or "chrome"),
+        channel=str(raw.get("channel") or ""),
         proxy_url=proxy_url,
         goto_timeout_ms=_int("goto_timeout_ms", ("pdp_goto_timeout_ms", "goto_timeout_ms"), defaults["goto_timeout_ms"]),
         ready_wait_ms=_int(
@@ -282,9 +282,10 @@ def create_stealth_context(
     pw = _get_playwright()
     chromium = pw.chromium
     launch_args: dict[str, Any] = {
-        "channel": browser_config.channel,
         "headless": browser_config.headless,
     }
+    if browser_config.channel:
+        launch_args["channel"] = browser_config.channel
     if browser_config.proxy_url:
         launch_args["proxy"] = {"server": browser_config.proxy_url}
 
@@ -313,8 +314,14 @@ def create_stealth_context(
 
 
 def close_context(context: BrowserContext) -> None:
+    browser = getattr(context, "browser", None)
     try:
         context.close()
+    except Exception:
+        pass
+    try:
+        if browser is not None:
+            browser.close()
     except Exception:
         pass
 
@@ -331,9 +338,10 @@ async def create_stealth_context_async(
     whose owning browser is stashed on ``context._pw_browser`` for later close.
     """
     launch_kwargs: dict[str, Any] = {
-        "channel": browser_config.channel,
         "headless": browser_config.headless,
     }
+    if browser_config.channel:
+        launch_kwargs["channel"] = browser_config.channel
     if browser_config.proxy_url:
         launch_kwargs["proxy"] = {"server": browser_config.proxy_url}
 
