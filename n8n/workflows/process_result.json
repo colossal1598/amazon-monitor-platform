@@ -99,7 +99,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.BACKEND_URL }}/api/state",
+        "url": "http://backend:8000/api/state",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -141,7 +141,7 @@
     {
       "parameters": {
         "method": "PUT",
-        "url": "={{ $env.BACKEND_URL }}/api/state",
+        "url": "http://backend:8000/api/state",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -167,7 +167,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.BACKEND_URL }}/api/price_history",
+        "url": "http://backend:8000/api/price_history",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -226,7 +226,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.BACKEND_URL }}/api/alerts",
+        "url": "http://backend:8000/api/alerts",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -305,7 +305,7 @@
     {
       "parameters": {
         "method": "PATCH",
-        "url": "={{ $env.BACKEND_URL }}/api/jobs/{{ $('Diff and Alerts').item.json.job_id }}/processed",
+        "url": "http://backend:8000/api/jobs/{{ $('Diff and Alerts').item.json.job_id }}/processed",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

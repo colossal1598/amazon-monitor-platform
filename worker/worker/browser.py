@@ -12,10 +12,12 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from playwright.async_api import BrowserContext as AsyncBrowserContext
 from playwright.sync_api import BrowserContext, Route, sync_playwright
+
+if TYPE_CHECKING:
+    from playwright.async_api import BrowserContext as AsyncBrowserContext
 
 try:  # playwright-stealth >= 2.0
     from playwright_stealth import Stealth  # type: ignore

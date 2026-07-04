@@ -24,7 +24,16 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.BACKEND_URL }}/api/alerts/pending?limit=50",
+        "url": "http://backend:8000/api/alerts/pending",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        },
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -143,7 +152,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.BACKEND_URL }}/api/alerts/{{ $('Prepare Alert').item.json.alert_id }}/sent",
+        "url": "http://backend:8000/api/alerts/{{ $('Prepare Alert').item.json.alert_id }}/sent",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -171,7 +180,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.BACKEND_URL }}/api/alerts/{{ $('Prepare Alert').item.json.alert_id }}/failed",
+        "url": "http://backend:8000/api/alerts/{{ $('Prepare Alert').item.json.alert_id }}/failed",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

@@ -1,0 +1,2 @@
+group_key,accepted_sellers,required_keywords,blacklist_keywords,blacklist_asins,min_price,max_price,require_free_shipping,require_shipping_signal,require_shippable,price_drop_percent,alert_new,alert_back_in_stock,alert_price_drop
+demo-serp,[],[],[],[],,,false,false,true,10,true,true,true

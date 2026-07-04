@@ -16,7 +16,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.BACKEND_URL }}/api/jobs/done",
+        "url": "http://backend:8000/api/jobs/done",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [{ "name": "limit", "value": "50" }]
@@ -74,7 +74,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.N8N_WEBHOOK_URL || 'http://n8n:5678/webhook/job-done' }}",
+        "url": "http://n8n:5678/webhook/job-done",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ { job_id: $json.job_id, group_key: $json.group_key, run_id: $json.run_id, kind: $json.kind, result: $json.result } }}",

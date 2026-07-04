@@ -25,6 +25,8 @@ After import, open each workflow and re-select Data Tables **From list** if node
 
 Set as n8n process/container environment variables (read in expressions via `{{ $env.NAME }}`).
 
+> **Community Edition:** n8n CE has no Variables UI. Service URLs are **hardcoded** in workflow JSON (`http://backend:8000`, etc.). Only secrets use `$env` — see **[deploy/N8N_HTTP_SETUP.md](../deploy/N8N_HTTP_SETUP.md)** for the full HTTP node checklist.
+
 | Variable | Example | Used by | Purpose |
 | --- | --- | --- | --- |
 | `BACKEND_URL` | `http://backend:8000` | all | Backend API base URL (no trailing slash) |

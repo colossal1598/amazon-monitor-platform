@@ -1,0 +1,2 @@
+group_key,name,kind,enabled,interval_minutes,last_run_at,selector_profile_key,browser_profile_key,notify_channel,headless,max_concurrent
+demo-serp,Demo SERP — USB-C cables,serp,true,15,,amazon-us-default,fast,,true,2

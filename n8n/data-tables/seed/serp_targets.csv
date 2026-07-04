@@ -1,0 +1,2 @@
+group_key,label,search_url,scrape_mode,max_pages,enabled
+demo-serp,USB-C cables newest,https://www.amazon.com/s?k=usb+c+cable&i=electronics&s=date-desc-rank,newest_front,1,true

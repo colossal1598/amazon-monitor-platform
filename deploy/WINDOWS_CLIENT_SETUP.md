@@ -105,7 +105,9 @@ Log in with `ADMIN_USER` / `ADMIN_PASSWORD`.
 
 ---
 
-## 4. Tailscale remote access (optional but recommended)
+## 4. Tailscale remote access
+
+### Option A — Tailnet only (private, recommended for n8n)
 
 Tailscale lets you open the Admin UI and n8n from your phone or another PC without port-forwarding on the router.
 
@@ -114,10 +116,39 @@ Tailscale lets you open the Admin UI and n8n from your phone or another PC witho
    - Admin UI: `http://100.x.y.z:8000/ui/` (or `http://client-pc.tailnet-name.ts.net:8000/ui/`)
    - n8n: `http://100.x.y.z:5678/`
 
+### Option B — Tailscale Funnel (public Admin UI)
+
+Funnel exposes services to the **public internet**. It only works on ports **443**, **8443**, and **10000** — not 8000.
+
+1. In `deploy/.env`, set:
+
+   ```env
+   BACKEND_PORT=8443
+   ```
+
+2. Restart the backend:
+
+   ```powershell
+   docker compose up -d backend
+   ```
+
+3. Enable Funnel (PowerShell as Administrator):
+
+   ```powershell
+   tailscale funnel --https=8443 http://127.0.0.1:8443
+   ```
+
+4. Open the public URL: `https://your-pc.your-tailnet.ts.net:8443/ui/`
+
+5. **Keep n8n on 5678** — do not funnel it unless you add a reverse proxy. n8n ↔ backend traffic stays inside Docker (`http://backend:8000`, `http://n8n:5678/webhook/job-done`).
+
+See **[N8N_HTTP_SETUP.md](N8N_HTTP_SETUP.md)** for every n8n HTTP node URL, header, and body.
+
 ### Security notes
 
 - **Change defaults** before exposing anything: `API_TOKEN`, `ADMIN_PASSWORD`, and `POSTGRES_PASSWORD`.
-- Only tailnet members can reach these ports; do **not** publish 8000/5678 to the public internet.
+- Tailnet access: only tailnet members can reach ports; do **not** publish 8000/5678 to the public internet without Funnel + HTTPS.
+- Funnel: Admin UI is public — use a strong `ADMIN_PASSWORD`.
 - Postgres (`5432`) is bound to localhost by default via Docker port mapping — keep it that way.
 - Anyone with `API_TOKEN` can enqueue jobs and read/write orchestration data; treat it like a root password.
 - n8n and the Admin UI share the same Basic-auth credentials — use a strong password.

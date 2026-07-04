@@ -157,7 +157,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.BACKEND_URL }}/api/jobs",
+        "url": "http://backend:8000/api/jobs",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
